@@ -1,0 +1,4 @@
+interface:
+  display_name: "Episode to Shorts"
+  short_description: "Polished episode clips, captions, and both video formats"
+  default_prompt: "Use $episode-to-shorts to edit this episode into 15 strong clips with Hinglish captions, prioritizing 9:16 and also exporting 16:9."

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.wrangler/
+.openai/
+work/
+outputs/
+*.mp4
+*.mkv
+*.mp3
+*.zip

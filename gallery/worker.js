@@ -17,8 +17,6 @@ export default {async fetch(request,env){
  const url=new URL(request.url),path=decodeURIComponent(url.pathname);
  if(path.startsWith('/api/publisher/'))return publisherApi(request,env);
  if(path==='/studio'&&request.method==='GET'){
-  if(!request.headers.get('oai-authenticated-user-id'))return Response.redirect(url.origin+'/signin-with-chatgpt?return_to='+encodeURIComponent(url.pathname+url.search),302);
-  if(!isPublisherOwner(request,env))return new Response('Publishing is only available to the site owner.',{status:403,headers:{'cache-control':'no-store'}});
   return new Response(STUDIO,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'}});
  }
  if(path==='/health')return json({ok:true,storage:!!env.BUCKET});

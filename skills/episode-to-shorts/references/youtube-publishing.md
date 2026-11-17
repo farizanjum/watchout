@@ -1,6 +1,6 @@
 # Optional reviewed YouTube publishing
 
-Use this only when the user asks to connect or publish to YouTube. Uploading clips to the gallery does not authorize posting them to a channel. The included gallery provides a private `/studio` page: choose a clip, edit the title and description, select visibility, audience and synthetic-media disclosure, review the exact channel and caption, then explicitly publish.
+Use this only when the user asks to connect or publish to YouTube. Uploading clips to the gallery does not authorize posting them to a channel. The included gallery provides a public `/studio` preview page with owner-only publishing: choose a clip, edit the title and description, select visibility, audience and synthetic-media disclosure, review the exact channel and caption, then explicitly publish.
 
 ## Connection and hosting
 
@@ -9,7 +9,7 @@ Use this only when the user asks to connect or publish to YouTube. Uploading cli
 3. With the user's authorization, make read-only API calls to verify active YouTube accounts. Select the intended channel; if there are multiple plausible accounts, ask which one. Do not substitute a channel's brand name for a verified identity. Display its actual name or channel ID and a link.
 4. Configure `ZERNIO_CHANNEL_ID` with Zernio's account `_id`, `ZERNIO_CHANNEL_NAME`, and `ZERNIO_CHANNEL_URL`. The optional studio connection form stores replacements as AES-GCM encrypted records using a random 32-byte `PUBLISHER_CIPHER_KEY` encoded as 64 lowercase hex characters.
 5. On ChatGPT Sites, set `AUTH_PROVIDER=chatgpt-sites` and `PUBLISHER_OWNER_EMAIL` server-side. The host supplies and sanitizes `oai-authenticated-user-id` and `oai-authenticated-user-email`. Public visitors cannot publish. Never enable this adapter on a raw Worker host where clients can forge those headers: replace `isPublisherOwner` and the sign-in route with the host's verified authentication first. The public gallery works without publisher setup.
-6. Apply runtime environment changes through a new deployment. Keep the gallery public and publishing routes private. Test anonymous and non-owner rejection, forged identity headers, cross-origin writes, and secret exclusion from responses and bundles.
+6. Apply runtime environment changes through a new deployment. Keep the gallery and studio preview public. Channel configuration, publishing, and publication-status API routes remain owner-only. Public visitors can preview clips, edit a local caption, download, and copy; they cannot change the shared catalog or post to the owner's channel. Test anonymous and non-owner rejection, forged identity headers, cross-origin writes, and secret exclusion from responses and bundles.
 
 ## Publication safeguards
 

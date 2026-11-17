@@ -11,7 +11,7 @@ const request=(path,body,owner=true,origin='https://test')=>new Request('https:/
 const payload={clipId:'one',title:'A real title',caption:'A real caption',visibility:'unlisted',madeForKids:false,containsSyntheticMedia:false,confirm:true};
 async function fixture(postResponse,options={}){
  const env={AUTH_PROVIDER:'chatgpt-sites',PUBLISHER_OWNER_EMAIL:'owner@example.test',PUBLISHER_CIPHER_KEY:'a'.repeat(64),BUCKET:new Bucket()};const calls=[];
- await env.BUCKET.put('catalog.json',JSON.stringify([{id:'one',file:'episode/clip.mp4',caption:'Original',title:'Original title'}]));
+ await env.BUCKET.put('catalog.json',JSON.stringify([{id:'one',file:'episode/clip.mp4',caption:'Original',title:'Original title',width:1080,height:1920,duration:30,sha256:'a'.repeat(64)}]));
  const transport=async(url,init)=>{calls.push({url,init});if(url.includes('/accounts'))return Response.json({accounts:[{_id:'channel-1',platform:'youtube',displayName:'Test channel',isActive:true}]});if(options.throwOnce){options.throwOnce=false;throw Error('network')}return Response.json(postResponse||{post:{_id:'post-1',status:'published',platforms:[{platform:'youtube',status:'published',platformPostUrl:'https://youtube.com/watch?v=123'}]}},{status:options.status||200})};
  await publisherApi(request('connect',{apiKey:'test-only-secret-key'}),env,transport);await publisherApi(request('channel',{accountId:'channel-1'}),env,transport);calls.length=0;return {env,calls,transport};
 }
@@ -45,3 +45,14 @@ test('a scheduled post already being published cannot be cancelled',async()=>{co
 test('Dubai local time maps to UTC and DST gaps or ambiguous hours are rejected',()=>{assert.equal(scheduleInput({delivery:'schedule',localTime:'2030-01-02T12:30',timezone:'Asia/Dubai'}).scheduledFor,'2030-01-02T08:30:00.000Z');for(const time of ['2030-03-10T02:30','2030-11-03T01:30'])assert.throws(()=>scheduleInput({delivery:'schedule',localTime:time,timezone:'America/New_York'}),/daylight saving/)});
 test('cancelled draft can be scheduled again without creating another post',async()=>{const f=await scheduleFixture();let d=await (await publisherApi(request('publish',{...payload,delivery:'schedule',scheduledFor:future(),timezone:'Asia/Dubai'}),f.env,f.transport)).json();d=await (await publisherApi(request('cancel-schedule',{clipId:'one',confirm:true,expectedRevision:d.revision}),f.env,f.transport)).json();const r=await publisherApi(request('change-schedule',{...payload,delivery:'schedule',scheduledFor:future(),timezone:'Asia/Dubai',expectedRevision:d.revision}),f.env,f.transport);assert.equal((await r.json()).status,'scheduled');assert.equal(f.calls.filter(c=>c.url.endsWith('/posts')).length,1)});
 test('only one concurrent schedule mutation reaches the provider',async()=>{const f=await scheduleFixture();const d=await (await publisherApi(request('publish',{...payload,delivery:'schedule',scheduledFor:future(),timezone:'Asia/Dubai'}),f.env,f.transport)).json();let release,started;const gate=new Promise(r=>release=r);const begun=new Promise(r=>started=r);const delayed=async(u,i)=>{if(i.method==='PUT'){started();await gate}return f.transport(u,i)};const body={clipId:'one',confirm:true,expectedRevision:d.revision};const first=publisherApi(request('cancel-schedule',body),f.env,delayed);await begun;const second=await publisherApi(request('cancel-schedule',body),f.env,delayed);assert.equal(second.status,409);release();assert.equal((await first).status,200);assert.equal(f.updates.length,1)});
+
+ test('Shorts gate rejects unverified, landscape, overlong and changed media before provider calls',async()=>{
+ for(const patch of [{width:1920,height:1080},{duration:180.01},{duration:0},{width:null},{sha256:null},{sha256:'b'.repeat(64)}]){
+  const {env,calls,transport}=await fixture();const clips=await (await env.BUCKET.get('catalog.json')).json();Object.assign(clips[0],patch);await env.BUCKET.put('catalog.json',JSON.stringify(clips));
+  const result=await publisherApi(request('publish',payload),env,transport);assert.equal(result.status,409);assert.equal(calls.length,0);
+ }
+});
+test('exactly 180-second square video remains Shorts eligible',async()=>{
+ const {env,calls,transport}=await fixture();const clips=await (await env.BUCKET.get('catalog.json')).json();Object.assign(clips[0],{width:1080,height:1080,duration:180});await env.BUCKET.put('catalog.json',JSON.stringify(clips));
+ assert.equal((await publisherApi(request('publish',payload),env,transport)).status,200);assert.ok(calls.some(c=>c.init?.method==='POST'));
+});

@@ -1,5 +1,6 @@
 import {publisherApi,isPublisherOwner} from './publisher.js';
 const HTML=__HTML__;
+const BRAND_ASSETS=__BRAND_ASSETS__;
 const STUDIO=__STUDIO__;
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
 const mediaKey=p=>/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.(mp4|jpg)$/.test(p)&&!p.includes('..');
@@ -15,6 +16,11 @@ async function authorized(req,env){const supplied=req.headers.get('authorization
 export default {async fetch(request,env){
  try{
  const url=new URL(request.url),path=decodeURIComponent(url.pathname);
+ if(path.startsWith('/brand/')&&['GET','HEAD'].includes(request.method)){
+  const name=path.slice(7),asset=Object.hasOwn(BRAND_ASSETS,name)?BRAND_ASSETS[name]:null;if(!asset)return new Response('Not found',{status:404});
+  const bytes=Uint8Array.from(atob(asset),c=>c.charCodeAt(0));const type=name.endsWith('.png')?'image/png':name.endsWith('.svg')?'image/svg+xml':'text/plain; charset=utf-8';
+  return new Response(request.method==='HEAD'?null:bytes,{headers:{'content-type':type,'content-length':String(bytes.length),'cache-control':'public,max-age=3600','x-content-type-options':'nosniff',...(url.searchParams.has('download')?{'content-disposition':'attachment; filename="'+name+'"'}:{})}});
+ }
  if(path.startsWith('/api/publisher/'))return publisherApi(request,env);
  if(path==='/studio'&&request.method==='GET'){
   return new Response(STUDIO,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'}});

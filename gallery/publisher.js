@@ -18,6 +18,16 @@ async function provider(apiKey,path,options={},transport=fetch){
 async function youtubeAccounts(key,transport){const result=await provider(key,'/accounts?platform=youtube&excludeHidden=true',{},transport);if(!result.ok)throw Object.assign(Error('Unable to read YouTube channels. Check the API key and its permissions.'),{status:result.status===401?400:502});const list=result.data.accounts||result.data.data?.accounts;if(!Array.isArray(list))throw Error('Unexpected channel response');return list.filter(a=>a.platform==='youtube'&&a.isActive!==false&&a.enabled!==false&&!a.needsReconnection).map(a=>({id:a._id,name:a.displayName||a.metadata?.profileData?.displayName||(a.username&&a.username!=='youtube_user'?a.username:null)||'YouTube Â· '+(a.platformUserId||a._id),username:a.username||'',url:safeVideoUrl(a.profileUrl)}))}
 async function readBody(req){const raw=await req.text();if(raw.length>16000)throw Object.assign(Error('Request too large'),{status:413});try{return JSON.parse(raw)}catch{throw Object.assign(Error('Invalid JSON'),{status:400})}}
 export function validatePublishInput(input){if(typeof input.clipId!=='string'||!input.clipId||input.clipId.length>160)throw Error('Choose a clip');if(typeof input.title!=='string'||!input.title.trim()||[...input.title].length>100||/[<>]/.test(input.title))throw Error('Title must be 1â€“100 characters without angle brackets');if(typeof input.caption!=='string'||!input.caption.trim()||[...input.caption].length>5000||/[<>]/.test(input.caption))throw Error('Caption must be 1â€“5000 characters without angle brackets');if(!['public','unlisted','private'].includes(input.visibility))throw Error('Choose visibility');if(typeof input.madeForKids!=='boolean'||typeof input.containsSyntheticMedia!=='boolean')throw Error('Review the audience and synthetic-media settings');if(input.confirm!==true)throw Error('Review and confirm before publishing')}
+
+async function verifiedShort(env,id,expectedSha){
+ const obj=await env.BUCKET.get('catalog.json'),catalog=obj?await obj.json():[],clip=catalog.find(c=>c.id===id);
+ if(!clip)throw Object.assign(Error('Clip is not available'),{status:404});
+ const media=await env.BUCKET.head('clips/'+clip.file);
+ if(!/^[a-f0-9]{64}$/.test(clip.sha256||'')||clip.sha256!==media?.customMetadata?.sha256||(expectedSha&&clip.sha256!==expectedSha))throw Object.assign(Error('Clip verification changed or is missing. Recheck the final export before publishing.'),{status:409});
+ if(!Number.isInteger(clip.width)||!Number.isInteger(clip.height)||clip.width<=0||clip.height<clip.width||!Number.isFinite(clip.duration)||clip.duration<=0||clip.duration>180)throw Object.assign(Error('Shorts require a verified vertical or square video up to 3 minutes. Choose a Shorts export.'),{status:409});
+ return {clip,media};
+}
+
 const hashText=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),b=>b.toString(16).padStart(2,'0')).join('');
 async function recordKey(accountId,clipId){return 'publisher/posts/'+await hashText(accountId+'\n'+clipId)+'.json'}
 function safeVideoUrl(raw){try{const u=new URL(raw);return u.protocol==='https:'&&['www.youtube.com','youtube.com','youtu.be'].includes(u.hostname)?u.href:null}catch{return null}}
@@ -93,6 +103,7 @@ export async function publisherApi(req,env,transport=fetch){
    const obj=await env.BUCKET.get(key);if(!obj)return pubJson({error:'No scheduled post found'},404);let record=await obj.json();
    if(!input.expectedRevision||input.expectedRevision!==(record.revision||record.createdAt))return pubJson({error:'The schedule changed. Refresh before editing.'},409);
    if(!record.postId)return pubJson({error:'The original request is not confirmed yet. Check status first.'},409);
+   if(!cancel)await verifiedShort(env,input.clipId,record.mediaSha256);
    record=await freshRecord(record,config,transport);
    if(!manageable(record))return pubJson({error:'This post is already publishing, published, or too close to its scheduled time to change safely.'},409);
    if(cancel&&record.status==='cancelled')return pubJson(receiptView(record));
@@ -107,8 +118,7 @@ export async function publisherApi(req,env,transport=fetch){
  }
  if(path==='/api/publisher/publish'&&req.method==='POST'){
   const input=await readBody(req);let timing;try{validatePublishInput(input);timing=scheduleInput(input)}catch(e){return pubJson({error:e.message},400)}
-  const catalogObj=await env.BUCKET.get('catalog.json');const catalog=catalogObj?await catalogObj.json():[];const clip=catalog.find(c=>c.id===input.clipId);if(!clip)return pubJson({error:'Clip is not available'},404);
-  const media=await env.BUCKET.head('clips/'+clip.file);if(!media?.customMetadata?.sha256)return pubJson({error:'Final clip is not verified'},409);
+  const {clip,media}=await verifiedShort(env,input.clipId);
   const accounts=await youtubeAccounts(config.apiKey,transport);if(!accounts.some(a=>a.id===config.channel.id))return pubJson({error:'The selected channel needs reconnecting in Zernio'},409);
   const key=await recordKey(config.channel.id,clip.id);let obj=await env.BUCKET.get(key);let record=obj?await obj.json():null;
   if(!record){
@@ -117,6 +127,7 @@ export async function publisherApi(req,env,transport=fetch){
    const created=await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-None-Match':'*'})});
    if(!created){obj=await env.BUCKET.get(key);record=await obj.json()}
   }
+  if(record.mediaSha256!==clip.sha256)return pubJson({error:'The original reviewed media changed. Check its status before making another request.'},409);
   if(record.postId||['published','failed'].includes(record.status))return pubJson(receiptView(record));
   if(Date.now()-Date.parse(record.createdAt)>23*3600000)return pubJson({error:'The earlier attempt has an uncertain result. Check Zernio before making another post.'},409);
   if(record.payload.scheduledFor&&Date.parse(record.payload.scheduledFor)<Date.now()+60000)return pubJson({error:'The original scheduled time has passed or is too close. Check Zernio; this request will not be sent as an immediate post.'},409);

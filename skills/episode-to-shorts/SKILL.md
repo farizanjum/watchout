@@ -84,3 +84,7 @@ Keep intermediate files out of the deliverable directory. Cache keys must includ
 Publish only QA-passed final exports. For the included optional gallery, show: video, social caption, Download Clip, Copy Caption. No hero, explanatory copy, dashboards, or extra on-screen labels. Download Clip also attempts to copy that clip's caption, with the separate button available when clipboard permission is restricted. Keep the original full-quality MP4 bytes and support video seeking and direct downloads.
 
 Write distinct social captions in the requested language from the actual moment; this workflow includes a Hinglish style. Use an accurate setup and curiosity; avoid invented dialogue, false reactions, misleading names, or revealing the punchline through text/emojis/hashtags. Ask the QA reviewer to check caption grounding and accidental spoilers too. Do not promise virality. Upload videos and posters first, verify their stored sizes/checksums, then append the catalog atomically. Verify anonymous access, all media URLs, download headers, and the copy/download flow. Deliver the live Site URL.
+
+## Optional YouTube publishing
+
+When requested, read `references/youtube-publishing.md` for the private review/publish flow, channel verification, secret handling, and retry safeguards. Gallery publication and YouTube posting are separate actions; the owner confirms the reviewed post.

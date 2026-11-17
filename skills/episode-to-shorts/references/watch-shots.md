@@ -28,4 +28,4 @@ The script needs Node 20+. It uploads exact original export bytes, checks stored
 
 Verify anonymous access, playback and seeking, attachment download headers, and copied captions. Download must return the original MP4, not a preview or transcoded copy. Test a full downloaded file's SHA-256 against the export. Clipboard permission depends on the visitor's browser; keep Copy Caption and manual text selection available. Publish only reviewed clips.
 
-Direct YouTube publishing is not included. It requires a separate OAuth integration and channel authorization; a public gallery must never expose the owner's channel token.
+Optional reviewed YouTube publishing is included. Read `youtube-publishing.md` before configuring it. The public gallery must never expose the owner's provider key or channel controls.

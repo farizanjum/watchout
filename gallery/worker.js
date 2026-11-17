@@ -1,4 +1,6 @@
+import {publisherApi,isPublisherOwner} from './publisher.js';
 const HTML=__HTML__;
+const STUDIO=__STUDIO__;
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
 const mediaKey=p=>/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.(mp4|jpg)$/.test(p)&&!p.includes('..');
 export function parseRange(value,size){
@@ -13,6 +15,12 @@ async function authorized(req,env){const supplied=req.headers.get('authorization
 export default {async fetch(request,env){
  try{
  const url=new URL(request.url),path=decodeURIComponent(url.pathname);
+ if(path.startsWith('/api/publisher/'))return publisherApi(request,env);
+ if(path==='/studio'&&request.method==='GET'){
+  if(!request.headers.get('oai-authenticated-user-id'))return Response.redirect(url.origin+'/signin-with-chatgpt?return_to='+encodeURIComponent(url.pathname+url.search),302);
+  if(!isPublisherOwner(request,env))return new Response('Publishing is only available to the site owner.',{status:403,headers:{'cache-control':'no-store'}});
+  return new Response(STUDIO,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'}});
+ }
  if(path==='/health')return json({ok:true,storage:!!env.BUCKET});
  if(path==='/api/clips'&&['GET','HEAD'].includes(request.method)){
   const catalog=await env.BUCKET.get('catalog.json');return new Response(request.method==='HEAD'?null:(catalog?.body||'[]'),{headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}})

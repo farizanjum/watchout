@@ -16,7 +16,7 @@ Use this only when the user asks to connect or publish to YouTube. Uploading cli
 - Select media and channel on the server, from uploaded verified catalog entries and the owner's active provider accounts. Never accept arbitrary upload URLs or account IDs from the publish request.
 - Freeze the reviewed payload before sending. Use a durable per-clip/channel record, an atomic create, and one stable provider idempotency key. Duplicate clicks and retries must reuse that exact payload.
 - An HTTP success is not proof of publication. Handle pending, failed, and uncertain outcomes honestly; expose status checks and link only a validated YouTube URL. Never label a timeout as success or blindly submit a new post.
-- The provider documents 24-hour idempotency retention. This implementation stops uncertain automatic retries at 23 hours and asks the owner to check Zernio. Successful or failed attempts cannot silently create a second post for the same clip/channel.
+- The provider documents 24-hour idempotency retention. This implementation stops uncertain automatic retries at 23 hours and asks the owner to check Zernio. Successful or failed attempts cannot silently create a second post for the same clip/channel; cancelled drafts reuse their existing provider post when rescheduled.
 - Test with mocked provider requests. Browser QA may open and cancel the final review dialog; do not publish a real clip merely to test the button unless explicitly authorized.
 - Recheck clips after media revisions before publishing. Preserve the highest-quality final export URL; the gallery must not transcode downloads.
 
@@ -28,3 +28,15 @@ Checked 2026-11-17: current Zernio pricing includes the first 2 connected accoun
 - https://docs.zernio.com/guides/rate-limits
 - https://docs.zernio.com/platforms/youtube/posts
 - https://docs.zernio.com/posts/create-post
+
+## Scheduling and minimal review UI
+
+Expose a Publish control on each clip. Keep the review focused on video, caption, Now/Schedule, and a final confirmation. Keep connection setup collapsed. Public visitors may review; provider mutations and schedule records remain owner-only. Preserve the current draft locally across sign-in, without storing credentials in the browser.
+
+Create future posts with scheduledFor and timezone, omitting publishNow. Reject dates less than five minutes ahead, ambiguous daylight-saving hours, nonexistent local hours, and invalid timezone identifiers. Past timestamps publish immediately in Zernio, so an expired uncertain retry must never be sent. Show an explicit timezone in review and receipt.
+
+Use the provider post status for scheduled/draft/publishing; a scheduled post can have a platform status of pending. Show Scheduled only after provider confirmation. Refresh due posts and selected receipts. Reschedule by updating the same provider post with isDraft:false, the new time, and reviewed metadata. Cancel via isDraft:true and confirm the returned draft status before displaying Schedule cancelled. Do not delete live YouTube videos.
+
+Use a conditional per-post lease and expected revision to reject concurrent/stale edits. Verify current provider state before mutations, and stop changes once publishing has begun or the schedule is within one minute. A failed or timed-out edit is not a confirmed cancellation. Let status refresh resolve uncertainty. Keep original idempotency keys for uncertain initial creations.
+
+Test scheduling, timezone conversion, rescheduling, cancellation, cancelled-draft reuse, authorization, failures, and concurrent edits with a mocked provider. Browser-test the full flow without creating a real scheduled post as a test.

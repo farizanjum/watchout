@@ -15,14 +15,45 @@ async function provider(apiKey,path,options={},transport=fetch){
  let data;try{data=await r.json()}catch{data={}}
  return {status:r.status,ok:r.ok,data,retryAfter:r.headers.get('retry-after')};
 }
-async function youtubeAccounts(key,transport){const result=await provider(key,'/accounts?platform=youtube&excludeHidden=true',{},transport);if(!result.ok)throw Object.assign(Error('Unable to read YouTube channels. Check the API key and its permissions.'),{status:result.status===401?400:502});const list=result.data.accounts||result.data.data?.accounts;if(!Array.isArray(list))throw Error('Unexpected channel response');return list.filter(a=>a.platform==='youtube'&&a.isActive!==false&&a.enabled!==false&&!a.needsReconnection).map(a=>({id:a._id,name:a.displayName||a.metadata?.profileData?.displayName||(a.username&&a.username!=='youtube_user'?a.username:null)||'YouTube · '+(a.platformUserId||a._id),username:a.username||'',url:safeVideoUrl(a.profileUrl)}))}
+async function youtubeAccounts(key,transport){const result=await provider(key,'/accounts?platform=youtube&excludeHidden=true',{},transport);if(!result.ok)throw Object.assign(Error('Unable to read YouTube channels. Check the API key and its permissions.'),{status:result.status===401?400:502});const list=result.data.accounts||result.data.data?.accounts;if(!Array.isArray(list))throw Error('Unexpected channel response');return list.filter(a=>a.platform==='youtube'&&a.isActive!==false&&a.enabled!==false&&!a.needsReconnection).map(a=>({id:a._id,name:a.displayName||a.metadata?.profileData?.displayName||(a.username&&a.username!=='youtube_user'?a.username:null)||'YouTube Â· '+(a.platformUserId||a._id),username:a.username||'',url:safeVideoUrl(a.profileUrl)}))}
 async function readBody(req){const raw=await req.text();if(raw.length>16000)throw Object.assign(Error('Request too large'),{status:413});try{return JSON.parse(raw)}catch{throw Object.assign(Error('Invalid JSON'),{status:400})}}
-export function validatePublishInput(input){if(typeof input.clipId!=='string'||!input.clipId||input.clipId.length>160)throw Error('Choose a clip');if(typeof input.title!=='string'||!input.title.trim()||[...input.title].length>100||/[<>]/.test(input.title))throw Error('Title must be 1–100 characters without angle brackets');if(typeof input.caption!=='string'||!input.caption.trim()||[...input.caption].length>5000||/[<>]/.test(input.caption))throw Error('Caption must be 1–5000 characters without angle brackets');if(!['public','unlisted','private'].includes(input.visibility))throw Error('Choose visibility');if(typeof input.madeForKids!=='boolean'||typeof input.containsSyntheticMedia!=='boolean')throw Error('Review the audience and synthetic-media settings');if(input.confirm!==true)throw Error('Review and confirm before publishing')}
+export function validatePublishInput(input){if(typeof input.clipId!=='string'||!input.clipId||input.clipId.length>160)throw Error('Choose a clip');if(typeof input.title!=='string'||!input.title.trim()||[...input.title].length>100||/[<>]/.test(input.title))throw Error('Title must be 1â€“100 characters without angle brackets');if(typeof input.caption!=='string'||!input.caption.trim()||[...input.caption].length>5000||/[<>]/.test(input.caption))throw Error('Caption must be 1â€“5000 characters without angle brackets');if(!['public','unlisted','private'].includes(input.visibility))throw Error('Choose visibility');if(typeof input.madeForKids!=='boolean'||typeof input.containsSyntheticMedia!=='boolean')throw Error('Review the audience and synthetic-media settings');if(input.confirm!==true)throw Error('Review and confirm before publishing')}
 const hashText=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),b=>b.toString(16).padStart(2,'0')).join('');
 async function recordKey(accountId,clipId){return 'publisher/posts/'+await hashText(accountId+'\n'+clipId)+'.json'}
 function safeVideoUrl(raw){try{const u=new URL(raw);return u.protocol==='https:'&&['www.youtube.com','youtube.com','youtu.be'].includes(u.hostname)?u.href:null}catch{return null}}
-function postSummary(result){const p=result.post||result.data?.post||{};const target=p.platforms?.find(x=>x.platform==='youtube')||{};return {postId:p._id||result.postId||null,status:target.status||p.status||'pending',videoUrl:safeVideoUrl(target.platformPostUrl),errorCode:typeof target.errorCategory==='string'?target.errorCategory.slice(0,100):null}}
-const receiptView=r=>({clipId:r.clipId,status:r.status,postId:r.postId||null,videoUrl:r.videoUrl||null,channel:r.channel,createdAt:r.createdAt,errorCode:r.errorCode||null,review:r.review,retryAllowed:!r.postId&&!['published','failed'].includes(r.status)&&Date.now()-Date.parse(r.createdAt)<23*3600000});
+
+export function scheduleInput(input){
+ const delivery=input.delivery||'now';if(!['now','schedule'].includes(delivery))throw Error('Choose publish now or schedule');
+ if(delivery==='now')return {delivery:'now'};
+ const timezone=input.timezone||'Asia/Dubai';let fmt;try{fmt=new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'})}catch{throw Error('Choose a valid timezone')}
+ let when;
+ if(input.localTime){
+  if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(input.localTime))throw Error('Choose a valid date and time');
+  const parts=input.localTime.match(/\d+/g).map(Number),base=Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4]);const matches=[];
+  for(let offset=-840;offset<=840;offset+=15){const time=base+offset*60000;const v=Object.fromEntries(fmt.formatToParts(time).map(x=>[x.type,x.value]));if(`${v.year}-${v.month}-${v.day}T${v.hour}:${v.minute}`===input.localTime)matches.push(time)}
+  if(matches.length!==1)throw Error('This local time is missing or ambiguous because of daylight saving. Choose another time.');when=matches[0];
+ }else{if(typeof input.scheduledFor!=='string'||!/(Z|[+-]\d\d:\d\d)$/.test(input.scheduledFor))throw Error('Schedule needs an explicit timezone');when=Date.parse(input.scheduledFor)}
+ if(!Number.isFinite(when)||when<Date.now()+300000)throw Error('Choose a time at least 5 minutes in the future');
+ return {delivery:'schedule',scheduledFor:new Date(when).toISOString(),timezone};
+}
+function postSummary(result){
+ const p=result.post||result.data?.post||{};const target=p.platforms?.find(x=>x.platform==='youtube')||{};
+ const status=target.status==='published'?'published':p.status==='draft'?'cancelled':['scheduled','publishing','cancelled'].includes(p.status)?p.status:target.status||p.status||'pending';
+ return {postId:p._id||result.postId||null,status,scheduledFor:status==='cancelled'?null:p.scheduledFor||null,timezone:p.timezone||'Asia/Dubai',videoUrl:safeVideoUrl(target.platformPostUrl),errorCode:typeof target.errorCategory==='string'?target.errorCategory.slice(0,100):null};
+}
+const manageable=r=>!!r.postId&&(r.status==='cancelled'||r.status==='scheduled'&&Date.parse(r.scheduledFor)>Date.now()+60000);
+const receiptView=r=>({clipId:r.clipId,status:r.status,postId:r.postId||null,videoUrl:r.videoUrl||null,channel:r.channel,createdAt:r.createdAt,errorCode:r.errorCode||null,review:r.review,scheduledFor:r.scheduledFor||null,timezone:r.timezone||r.review?.timezone||'Asia/Dubai',revision:r.revision||r.createdAt,canManageSchedule:manageable(r),retryAllowed:!r.postId&&!['published','failed','cancelled'].includes(r.status)&&Date.now()-Date.parse(r.createdAt)<23*3600000});
+async function freshRecord(record,config,transport){
+ const r=await provider(config.apiKey,'/posts/'+encodeURIComponent(record.postId),{},transport);
+ if(!r.ok||!(r.data.post||r.data.data?.post))throw Object.assign(Error('Cannot verify the current post status. Refresh before changing it.'),{status:502});
+ const post=r.data.post||r.data.data.post;const target=post.platforms?.find(p=>p.platform==='youtube');const account=target?.accountId?._id||target?.accountId;
+ if(account&&account!==config.channel.id)throw Object.assign(Error('The post does not belong to the connected channel'),{status:409});
+ const summary=postSummary(r.data);return {...record,...summary,review:{...record.review,...(typeof post.content==='string'?{caption:post.content}:{}),...(target?.platformSpecificData?.title?{title:target.platformSpecificData.title}:{}),...(summary.scheduledFor?{delivery:'schedule',scheduledFor:summary.scheduledFor,timezone:summary.timezone}:{})}};
+}
+async function scheduleLock(env,key){
+ const lockKey=key+'.lock',prior=await env.BUCKET.get(lockKey);if(prior&&(await prior.json()).expiresAt>Date.now())return null;
+ const result=await env.BUCKET.put(lockKey,JSON.stringify({expiresAt:Date.now()+240000}),{onlyIf:new Headers(prior?{'If-Match':prior.httpEtag}:{'If-None-Match':'*'})});return result?lockKey:null;
+}
 export async function publisherApi(req,env,transport=fetch){
  const url=new URL(req.url),path=url.pathname;
  if(path==='/api/publisher/session'&&req.method==='GET')return pubJson({owner:isPublisherOwner(req,env)});
@@ -44,25 +75,51 @@ export async function publisherApi(req,env,transport=fetch){
  }
  if(path==='/api/publisher/disconnect'&&req.method==='POST'){await saveConfig({disabled:true},env);return pubJson({ok:true})}
  if(!config?.apiKey||!config?.channel)return pubJson({error:'Connect Zernio and choose your channel first'},409);
+
+ if(path==='/api/publisher/statuses'&&req.method==='GET'){
+  const obj=await env.BUCKET.get('catalog.json');const catalog=obj?await obj.json():[];const records=[];
+  for(const clip of catalog){const key=await recordKey(config.channel.id,clip.id),obj=await env.BUCKET.get(key);if(!obj)continue;let record=await obj.json();if(record.postId&&(record.status==='publishing'||record.status==='scheduled'&&Date.parse(record.scheduledFor)<Date.now()+60000)){try{record=await freshRecord(record,config,transport);await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-Match':obj.httpEtag})})}catch{}}records.push(receiptView(record))}return pubJson({records});
+ }
  if(path==='/api/publisher/status'&&req.method==='GET'){
   const clipId=url.searchParams.get('clipId');if(!clipId)return pubJson({error:'Choose a clip'},400);const key=await recordKey(config.channel.id,clipId),obj=await env.BUCKET.get(key);if(!obj)return pubJson({status:'not_published'});let record=await obj.json();
-  if(record.postId&&!['published','failed'].includes(record.status)){const r=await provider(config.apiKey,'/posts/'+encodeURIComponent(record.postId),{},transport);if(r.ok){record={...record,...postSummary(r.data)};await env.BUCKET.put(key,JSON.stringify(record))}}
+  if(record.postId&&!['published','failed'].includes(record.status)){record=await freshRecord(record,config,transport);const saved=await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-Match':obj.httpEtag})});if(!saved){const latest=await env.BUCKET.get(key);record=await latest.json()}}
   return pubJson(receiptView(record));
  }
+ if(['/api/publisher/change-schedule','/api/publisher/cancel-schedule'].includes(path)&&req.method==='POST'){
+  const input=await readBody(req);if(typeof input.clipId!=='string'||input.confirm!==true)return pubJson({error:'Review and confirm the schedule change'},400);
+  let timing;const cancel=path.endsWith('/cancel-schedule');if(!cancel){try{validatePublishInput(input);timing=scheduleInput(input)}catch(e){return pubJson({error:e.message},400)}}
+  const key=await recordKey(config.channel.id,input.clipId),lock=await scheduleLock(env,key);if(!lock)return pubJson({error:'Another change is in progress. Refresh the status.'},409);
+  try{
+   const obj=await env.BUCKET.get(key);if(!obj)return pubJson({error:'No scheduled post found'},404);let record=await obj.json();
+   if(!input.expectedRevision||input.expectedRevision!==(record.revision||record.createdAt))return pubJson({error:'The schedule changed. Refresh before editing.'},409);
+   if(!record.postId)return pubJson({error:'The original request is not confirmed yet. Check status first.'},409);
+   record=await freshRecord(record,config,transport);
+   if(!manageable(record))return pubJson({error:'This post is already publishing, published, or too close to its scheduled time to change safely.'},409);
+   if(cancel&&record.status==='cancelled')return pubJson(receiptView(record));
+   const review=cancel?record.review:{title:input.title.trim(),caption:input.caption.trim(),visibility:input.visibility,madeForKids:input.madeForKids,containsSyntheticMedia:input.containsSyntheticMedia,...timing};
+   const body=cancel?{isDraft:true}:{isDraft:false,content:review.caption,platforms:[{platform:'youtube',accountId:config.channel.id,platformSpecificData:{title:review.title,visibility:review.visibility,madeForKids:review.madeForKids,containsSyntheticMedia:review.containsSyntheticMedia}}],...(timing.delivery==='schedule'?{scheduledFor:timing.scheduledFor,timezone:timing.timezone}:{publishNow:true})};
+   let result;try{result=await provider(config.apiKey,'/posts/'+encodeURIComponent(record.postId),{method:'PUT',body:JSON.stringify(body)},transport)}catch{return pubJson({error:'The change was not confirmed. Check status before trying again.'},502)}
+   if(!result.ok)return pubJson({error:'Zernio did not confirm the change. Check status before trying again.'},502);
+   const summary=(result.data.post||result.data.data?.post)?postSummary(result.data):await freshRecord(record,config,transport);
+   if(cancel&&summary.status!=='cancelled')return pubJson({error:'Cancellation is not confirmed. Check status before leaving.'},502);
+   record={...record,...summary,review,revision:crypto.randomUUID(),updatedAt:new Date().toISOString()};await env.BUCKET.put(key,JSON.stringify(record));return pubJson(receiptView(record));
+  }finally{await env.BUCKET.delete(lock)}
+ }
  if(path==='/api/publisher/publish'&&req.method==='POST'){
-  const input=await readBody(req);try{validatePublishInput(input)}catch(e){return pubJson({error:e.message},400)}
+  const input=await readBody(req);let timing;try{validatePublishInput(input);timing=scheduleInput(input)}catch(e){return pubJson({error:e.message},400)}
   const catalogObj=await env.BUCKET.get('catalog.json');const catalog=catalogObj?await catalogObj.json():[];const clip=catalog.find(c=>c.id===input.clipId);if(!clip)return pubJson({error:'Clip is not available'},404);
   const media=await env.BUCKET.head('clips/'+clip.file);if(!media?.customMetadata?.sha256)return pubJson({error:'Final clip is not verified'},409);
   const accounts=await youtubeAccounts(config.apiKey,transport);if(!accounts.some(a=>a.id===config.channel.id))return pubJson({error:'The selected channel needs reconnecting in Zernio'},409);
   const key=await recordKey(config.channel.id,clip.id);let obj=await env.BUCKET.get(key);let record=obj?await obj.json():null;
   if(!record){
-   const review={title:input.title.trim(),caption:input.caption.trim(),visibility:input.visibility,madeForKids:input.madeForKids,containsSyntheticMedia:input.containsSyntheticMedia};
-   record={clipId:clip.id,channel:config.channel,createdAt:new Date().toISOString(),status:'pending',idempotencyKey:crypto.randomUUID(),review,mediaSha256:media.customMetadata.sha256,payload:{content:review.caption,mediaItems:[{type:'video',url:url.origin+'/media/'+clip.file}],platforms:[{platform:'youtube',accountId:config.channel.id,platformSpecificData:{title:review.title,visibility:review.visibility,madeForKids:review.madeForKids,containsSyntheticMedia:review.containsSyntheticMedia}}],publishNow:true}};
+   const review={title:input.title.trim(),caption:input.caption.trim(),visibility:input.visibility,madeForKids:input.madeForKids,containsSyntheticMedia:input.containsSyntheticMedia,...timing};
+   record={clipId:clip.id,channel:config.channel,createdAt:new Date().toISOString(),status:'pending',revision:crypto.randomUUID(),idempotencyKey:crypto.randomUUID(),review,mediaSha256:media.customMetadata.sha256,payload:{content:review.caption,mediaItems:[{type:'video',url:url.origin+'/media/'+clip.file}],platforms:[{platform:'youtube',accountId:config.channel.id,platformSpecificData:{title:review.title,visibility:review.visibility,madeForKids:review.madeForKids,containsSyntheticMedia:review.containsSyntheticMedia}}],...(timing.delivery==='schedule'?{scheduledFor:timing.scheduledFor,timezone:timing.timezone}:{publishNow:true})}};
    const created=await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-None-Match':'*'})});
    if(!created){obj=await env.BUCKET.get(key);record=await obj.json()}
   }
   if(record.postId||['published','failed'].includes(record.status))return pubJson(receiptView(record));
   if(Date.now()-Date.parse(record.createdAt)>23*3600000)return pubJson({error:'The earlier attempt has an uncertain result. Check Zernio before making another post.'},409);
+  if(record.payload.scheduledFor&&Date.parse(record.payload.scheduledFor)<Date.now()+60000)return pubJson({error:'The original scheduled time has passed or is too close. Check Zernio; this request will not be sent as an immediate post.'},409);
   // Retries always send the original reviewed payload and idempotency key.
   let result;try{result=await provider(config.apiKey,'/posts',{method:'POST',headers:{'Idempotency-Key':record.idempotencyKey},body:JSON.stringify(record.payload)},transport)}catch{record.status='unknown';await env.BUCKET.put(key,JSON.stringify(record));return pubJson({...receiptView(record),message:'No final response yet. Check status or safely retry the same reviewed post.'},202)}
   const summary=postSummary(result.data);

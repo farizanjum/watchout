@@ -49,7 +49,7 @@ The agent must create and review the manifests; these commands do not automatica
 
 `gallery/` contains a minimal public Worker app: clips, social captions, Download Clip, and Copy Caption. Download also attempts to copy the caption. It serves original MP4 bytes with seeking and checksum verification, never a lower-quality preview download. It requires your own storage and upload secret. Read [the deployment and upload guide](skills/episode-to-shorts/references/watch-shots.md).
 
-The editing skill does not require ChatGPT Sites. Any compatible Worker host can run the gallery after you configure `BUCKET` and `UPLOAD_TOKEN`. No credentials, channel access, source episodes, or finished clips are included. The studio preview is public. An optional owner-only Zernio integration adds a review/publish flow for YouTube. Read [the connection and security guide](skills/episode-to-shorts/references/youtube-publishing.md). Its supplied identity adapter requires ChatGPT Sites; other hosts must provide verified owner authentication before enabling publishing.
+The editing skill does not require ChatGPT Sites. Any compatible Worker host can run the gallery after you configure `BUCKET` and `UPLOAD_TOKEN`. No credentials, channel access, source episodes, or finished clips are included. The studio preview is public. An optional owner-only Zernio integration adds a review/publish flow for YouTube, including scheduled posts, rescheduling, cancellation to draft, and status tracking. Read [the connection and security guide](skills/episode-to-shorts/references/youtube-publishing.md). Its supplied identity adapter requires ChatGPT Sites; other hosts must provide verified owner authentication before enabling publishing.
 
 ## Checks
 

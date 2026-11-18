@@ -6,6 +6,8 @@ For reaction-focused gaming clips, prioritize visible surprises, physical reacti
 
 Include mission mini-stories when requested: a clear objective, an intense chase or encounter, a funny failed attempt, or a satisfying completion. Retain chronological setup, action and payoff; do not select generic gunfire without a comprehensible objective.
 
+Persist source-specific required description hashtags in the job state. Include the user's exact requested spelling in every relevant social caption, gallery entry and provider description, including scheduled posts. Add only grounded context tags. Do not apply a game's hashtag to unrelated future sources. A request for description hashtags does not authorize adding on-video headlines or a new voiceover.
+
 ## Capture and clocks
 
 - Verify source channel, current live state, highest available format and frame rate. A live stream may expose different formats after it ends.

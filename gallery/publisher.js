@@ -65,7 +65,7 @@ async function adoptExternalPost(env,config,clipId,transport){
  await verifiedShort(env,clipId);
  const result=await provider(config.apiKey,'/posts/'+external.postId,{},transport);const post=result.data.post||result.data.data?.post;
  const target=post?.platforms?.find(p=>p.platform==='youtube'),account=target?.accountId?._id||target?.accountId;
- if(!result.ok||account!==config.channel.id||post.content!==clip.caption)throw Object.assign(Error('External post does not match this clip and channel'),{status:409});
+ if(!result.ok||account!==config.channel.id||(target.customContent||post.content)!==clip.caption)throw Object.assign(Error('External post does not match this clip and channel'),{status:409});
  const media=post.mediaItems?.find(m=>m.type==='video');let mediaUrl;try{mediaUrl=new URL(media?.url)}catch{throw Object.assign(Error('External post video is missing'),{status:409})}
  if(mediaUrl.protocol!=='https:'||mediaUrl.hostname!=='media.zernio.com')throw Object.assign(Error('External post media host is not verified'),{status:409});
  const bytes=await transport(mediaUrl.href,{redirect:'error',signal:AbortSignal.timeout(120000)});const size=Number(bytes.headers.get('content-length'));
@@ -81,7 +81,7 @@ async function freshRecord(record,config,transport){
  if(!r.ok||!(r.data.post||r.data.data?.post))throw Object.assign(Error('Cannot verify the current post status. Refresh before changing it.'),{status:502});
  const post=r.data.post||r.data.data.post;const target=post.platforms?.find(p=>p.platform==='youtube');const account=target?.accountId?._id||target?.accountId;
  if(account&&account!==config.channel.id)throw Object.assign(Error('The post does not belong to the connected channel'),{status:409});
- const summary=postSummary(r.data);return {...record,...summary,review:{...record.review,...(typeof post.content==='string'?{caption:post.content}:{}),...(target?.platformSpecificData?.title?{title:target.platformSpecificData.title}:{}),...(summary.scheduledFor?{delivery:'schedule',scheduledFor:summary.scheduledFor,timezone:summary.timezone}:{})}};
+ const summary=postSummary(r.data),content=target?.customContent||post.content;return {...record,...summary,review:{...record.review,...(typeof content==='string'?{caption:content}:{}),...(target?.platformSpecificData?.title?{title:target.platformSpecificData.title}:{}),...(summary.scheduledFor?{delivery:'schedule',scheduledFor:summary.scheduledFor,timezone:summary.timezone}:{})}};
 }
 async function scheduleLock(env,key){
  const lockKey=key+'.lock',prior=await env.BUCKET.get(lockKey);if(prior&&(await prior.json()).expiresAt>Date.now())return null;
@@ -118,7 +118,7 @@ export async function publisherApi(req,env,transport=fetch){
  if(path==='/api/publisher/status'&&req.method==='GET'){
   if(automation&&!url.searchParams.get('clipId')?.startsWith(env.AUTOMATION_CLIP_PREFIX))return pubJson({error:'Clip is outside the authorized batch'},403);
   const clipId=url.searchParams.get('clipId');if(!clipId)return pubJson({error:'Choose a clip'},400);const key=await recordKey(config.channel.id,clipId),obj=await env.BUCKET.get(key);if(!obj){const adopted=await adoptExternalPost(env,config,clipId,transport);return pubJson(adopted?receiptView(adopted):{status:'not_published'})}let record=await obj.json();
-  if(record.postId&&!['published','failed'].includes(record.status)){record=await freshRecord(record,config,transport);const saved=await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-Match':obj.httpEtag})});if(!saved){const latest=await env.BUCKET.get(key);record=await latest.json()}}
+  if(record.postId&&(!['published','failed'].includes(record.status)||url.searchParams.get('refresh')==='1')){record=await freshRecord(record,config,transport);const saved=await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-Match':obj.httpEtag})});if(!saved){const latest=await env.BUCKET.get(key);record=await latest.json()}}
   return pubJson(receiptView(record));
  }
  if(['/api/publisher/change-schedule','/api/publisher/cancel-schedule'].includes(path)&&req.method==='POST'){

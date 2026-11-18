@@ -9,6 +9,11 @@ class Bucket{
 }
 const request=(path,body,owner=true,origin='https://test')=>new Request('https://test/api/publisher/'+path,{method:body===undefined?'GET':'POST',headers:{...(owner?{'oai-authenticated-user-id':'owner-id','oai-authenticated-user-email':'owner@example.test'}:{}),origin,'x-watchout-intent':'owner','content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
 const payload={clipId:'one',title:'A real title',caption:'A real caption',visibility:'unlisted',madeForKids:false,containsSyntheticMedia:false,confirm:true};
+test('explicit refresh reads edited YouTube description without creating another post',async()=>{
+ const f=await fixture();await publisherApi(request('publish',payload),f.env,f.transport);let reads=0;
+ const edited=async(url,init)=>{assert.ok(url.endsWith('/posts/post-1'));assert.equal(init.method,undefined);reads++;return Response.json({post:{_id:'post-1',status:'published',content:'Original shared text',platforms:[{platform:'youtube',status:'published',customContent:'Updated description #gtavi',platformPostUrl:'https://youtube.com/watch?v=123'}]}})};
+ const result=await publisherApi(request('status?clipId=one&refresh=1'),f.env,edited);const value=await result.json();assert.equal(value.status,'published');assert.equal(value.review.caption,'Updated description #gtavi');assert.equal(reads,1);assert.equal(f.calls.filter(c=>c.url.endsWith('/posts')).length,1);
+});
 async function fixture(postResponse,options={}){
  const env={AUTH_PROVIDER:'chatgpt-sites',PUBLISHER_OWNER_EMAIL:'owner@example.test',PUBLISHER_CIPHER_KEY:'a'.repeat(64),BUCKET:new Bucket()};const calls=[];
  await env.BUCKET.put('catalog.json',JSON.stringify([{id:'one',file:'episode/clip.mp4',caption:'Original',title:'Original title',width:1080,height:1920,duration:30,sha256:'a'.repeat(64)}]));

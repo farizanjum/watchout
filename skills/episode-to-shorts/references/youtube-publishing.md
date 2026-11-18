@@ -20,6 +20,8 @@ Use this only when the user asks to connect or publish to YouTube. Uploading cli
 - Test with mocked provider requests. Browser QA may open and cancel the final review dialog; do not publish a real clip merely to test the button unless explicitly authorized.
 - Recheck clips after media revisions before publishing. Preserve the highest-quality final export URL; the gallery must not transcode downloads.
 
+- For a requested description correction on an already-published YouTube video, use `POST /v1/posts/{postId}/edit` with platform, accountId and content; do not create another video. A scheduled post uses `PUT /v1/posts/{postId}` with its content while preserving its time. Read the current description first and preserve unrelated edits. Zernio may store an edited YouTube description in the selected target's `customContent`, overriding the root `content`; verify that effective value, the unchanged video ID and the unchanged schedule. The gallery supports an authenticated `status?clipId=...&refresh=1` read to refresh published metadata. Source: https://docs.zernio.com/posts/edit-post
+
 ## Current limits and sources
 
 Checked 2026-11-17: current Zernio pricing includes the first 2 connected accounts, unlimited monthly posts, and 60 API requests/minute for 0-2 accounts. Posting caps are 25/hour/account and 50/day for YouTube, subject to YouTube's own limits. Legacy plans can differ. Four or five Shorts per day on one connected YouTube channel fits these documented limits. Recheck before reuse.

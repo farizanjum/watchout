@@ -7,9 +7,7 @@ description: Turn a long episode, podcast, interview, or comedy show into review
 
 Deliver finished clips, a timestamped full transcript, editable caption/timeline data, and a simple preview gallery. Use the user's requested count and formats. For a request like the workflow this skill was built from, target 10–15 standalone moments, prioritize 1080×1920, and also export 1920×1080.
 
-This is an agent-readable workflow, not an autonomous clip picker. Any assistant that can read Markdown can follow the editorial instructions. Executing the helpers needs filesystem access and a shell; reviewing media needs image/video/audio tools. Use the user's requested language, branding, destination, and publication scope.
-
-Publishing is optional. When explicitly requested, use a destination owned by the user, preserve existing clips, and follow `references/watch-shots.md`. Never upload to the original author's account or assume that installing this skill authorizes public publication.
+After clipping and QA, add the final vertical Shorts to the existing public **Watch Out** ChatGPT Site, as this user explicitly requested. Include a catchy, source-grounded social caption in the user's requested language. Do not carry a previous episode's Hinglish preference into a new English-language job: confirm the current job's rules for titles, descriptions and spoken captions separately. Read `references/watch-shots.md` for the existing Site and upload workflow. Preserve older clips and respect any later local-only or different-publication instruction.
 
 For live gaming streams and hourly batches, read `references/livestreams.md`. The latest requested formats take priority: use `--format vertical` for 9:16-only delivery.
 
@@ -32,7 +30,7 @@ Use external footage only when it improves the specific edit. This workflow does
 
 Use spoken-dialogue captions only by default. Do not add opening title text, hook headlines, or editorial summaries over the video unless explicitly requested. Clip names can remain in the gallery and filenames.
 
-Use the user's exact channel name for a requested watermark. For example, `Watch Out` goes near the top, clear of faces and captions. Do not add branding when the user did not request it. Set `watermark` in the manifest; the caption generator renders it for the full duration in both formats. This branding is separate from the unwanted opening headlines.
+For this user's Watch Out edits, use a small persistent `Watch Out` watermark near the top, clear of faces and captions. Set `watermark` in the manifest; the caption generator renders it for the full duration in both formats. This branding is separate from the unwanted opening headlines.
 
 When requested, Hindi must be in Roman letters; preserve spoken English as English. Romanization is not English translation. Use natural spellings and confirm proper names. Preserve the meaning and the user's profanity preference.
 
@@ -68,7 +66,7 @@ Read `references/manifest.md` when preparing a render manifest. `scripts/render.
 
 Before calling clips finished:
 
-- Use a separate QA agent when available and permitted by the host. An independent human reviewer can fill this role too. Give it the source, every finished export, timeline/caption files, participant map, and known findings. It should review independently rather than relying on the editor's description. If agents are unavailable, disclose that and perform a separate QA pass; do not claim independent review.
+- Assign a separate QA agent, as explicitly requested for this workflow. Give it the source, every finished export, timeline/caption files, participant map, and known findings. It should review independently rather than relying on the editor's description. If agents are unavailable, disclose that and perform a separate QA pass; do not claim independent review.
 - Have the reviewer cover the whole timeline: every shot, speaker change, internal cut, start/end, and moving-subject interval. Compare the original and edited frames, and listen where audio is available. One midpoint per shot is insufficient; inspect near both ends and through movement. Record the actual inspection scope and any unverified audio wording.
 - Require a finding log with clip/time, evidence, severity, fix, and recheck result. Fix every blocking finding, rerender, then ask the reviewer to recheck the changed footage. Do not treat full-file decoding as proof of correct editorial framing.
 - Tie the independent QA report to SHA-256 hashes of all final exports and edit manifests. Run `scripts/verify_qa.py --report REPORT_JSON --output-dir OUTPUTS --manifest-dir EDITS` before packaging. This gate rejects open findings, missing clip/export coverage, and files changed after review. Participant-map approval alone is not independent editorial approval.
@@ -83,9 +81,9 @@ Keep intermediate files out of the deliverable directory. Cache keys must includ
 
 ## Watch Out publication
 
-Publish only QA-passed final exports. For the included optional gallery, show: video, social caption, Download Clip, Copy Caption. No hero, explanatory copy, dashboards, or extra on-screen labels. Download Clip also attempts to copy that clip's caption, with the separate button available when clipboard permission is restricted. Keep the original full-quality MP4 bytes and support video seeking and direct downloads.
+Publish only QA-passed final exports. The Site must remain a minimal gallery: video, social caption, Download Clip, Copy Caption. No hero, explanatory copy, dashboards, or extra on-screen labels. Download Clip also attempts to copy that clip's caption, with the separate button available when clipboard permission is restricted. Keep the original full-quality MP4 bytes and support video seeking and direct downloads.
 
-Write distinct social captions in the requested language from the actual moment; this workflow includes a Hinglish style. Use an accurate setup and curiosity; avoid invented dialogue, false reactions, misleading names, or revealing the punchline through text/emojis/hashtags. Ask the QA reviewer to check caption grounding and accidental spoilers too. Do not promise virality. Upload videos and posters first, verify their stored sizes/checksums, then append the catalog atomically. Verify anonymous access, all media URLs, download headers, and the copy/download flow. Deliver the live Site URL.
+Write distinct Hinglish captions from the actual moment. Use an accurate setup and curiosity; avoid invented dialogue, false reactions, misleading names, or revealing the punchline through text/emojis/hashtags. Ask the QA reviewer to check caption grounding and accidental spoilers too. Do not promise virality. Upload videos and posters first, verify their stored sizes/checksums, then append the catalog atomically. Verify anonymous access, all media URLs, download headers, and the copy/download flow. Deliver the live Site URL.
 
 ## Optional YouTube publishing
 

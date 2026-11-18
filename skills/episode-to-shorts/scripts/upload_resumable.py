@@ -4,7 +4,7 @@ import concurrent.futures,hashlib,requests,time
 CHUNK=131072
 def upload_file(file,key,token,origin,workers=8):
  file=Path(file);size=file.stat().st_size;sha=hashlib.file_digest(file.open('rb'),'sha256').hexdigest()
- if not 0<size<=64*1024*1024:raise ValueError('Chunk assembly supports up to64MiB')
+ if not 0<size<=120*1024*1024:raise ValueError('Chunk assembly supports up to120MiB')
  headers={'Authorization':'Bearer '+token,'Connection':'close'}
  remote=requests.head(origin.rstrip('/')+'/media/'+key,timeout=30)
  if remote.ok and int(remote.headers.get('content-length',0))==size and remote.headers.get('x-content-sha256')==sha:return {'key':key,'size':size,'sha256':sha}

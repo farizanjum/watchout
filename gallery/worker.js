@@ -39,7 +39,7 @@ export default {async fetch(request,env){
  if(path.startsWith('/api/assemble/')&&request.method==='POST'){
   if(!await authorized(request,env))return json({error:'Unauthorized'},401);
   const key=path.slice('/api/assemble/'.length),body=await request.json();
-  if(!mediaKey(key)||!Number.isSafeInteger(body.size)||body.size<=0||body.size>64*1024*1024||body.chunkSize!==131072||!/^[a-f0-9]{64}$/.test(body.sha256||''))return json({error:'Invalid assembly'},400);
+  if(!mediaKey(key)||!Number.isSafeInteger(body.size)||body.size<=0||body.size>120*1024*1024||body.chunkSize!==131072||!/^[a-f0-9]{64}$/.test(body.sha256||''))return json({error:'Invalid assembly'},400);
   const prior=await env.BUCKET.head('clips/'+key);
   if(prior)return prior.size===body.size&&prior.customMetadata?.sha256===body.sha256?json({ok:true,key,size:prior.size,sha256:body.sha256}):json({error:'Immutable media key exists'},409);
   const count=Math.ceil(body.size/body.chunkSize),stream=new FixedLengthStream(body.size),writer=stream.writable.getWriter();

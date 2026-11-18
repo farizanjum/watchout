@@ -54,14 +54,26 @@ export default {async fetch(request,env){
   const prior=await env.BUCKET.head('clips/'+key);
   if(prior)return prior.size===body.size&&prior.customMetadata?.sha256===body.sha256?json({ok:true,key,size:prior.size,sha256:body.sha256}):json({error:'Immutable media key exists'},409);
   const count=Math.ceil(body.size/body.chunkSize),stream=new FixedLengthStream(body.size),writer=stream.writable.getWriter();
-  const produce=(async()=>{try{for(let i=0;i<count;i++){
-   const part=await env.BUCKET.get('staging/'+body.sha256+'/'+i),expected=Math.min(body.chunkSize,body.size-i*body.chunkSize);
-   if(!part||part.size!==expected)throw Error('Missing or incorrect chunk');
-   const reader=part.body.getReader();try{while(true){const {value,done}=await reader.read();if(done)break;await writer.write(value)}}finally{reader.releaseLock()}
-  }await writer.close()}catch(error){await writer.abort(error);throw error}})();
+  // Four bounded reads avoid hundreds of serial storage round trips while
+  // keeping buffered media below 512 KiB and leaving room for the upload.
+  let copied=0;
+  const produce=(async()=>{try{for(let base=0;base<count;base+=4){
+   const parts=await Promise.all(Array.from({length:Math.min(4,count-base)},async(_,offset)=>{
+    const i=base+offset,part=await env.BUCKET.get('staging/'+body.sha256+'/'+i),expected=Math.min(body.chunkSize,body.size-i*body.chunkSize);
+    if(!part||part.size!==expected)throw Error('Missing or incorrect chunk');
+    const bytes=new Uint8Array(await new Response(part.body).arrayBuffer());
+    if(bytes.length!==expected)throw Error('Incorrect chunk body');return bytes;
+   }));
+   for(const bytes of parts){await writer.write(bytes);copied++}
+  }await writer.close()}catch(error){void writer.abort(error).catch(()=>{});throw error}})();
   const upload=env.BUCKET.put('clips/'+key,stream.readable,{sha256:body.sha256,httpMetadata:{contentType:key.endsWith('.mp4')?'video/mp4':'image/jpeg'},customMetadata:{sha256:body.sha256}});
-  const results=await Promise.allSettled([produce,upload]);if(results.some(r=>r.status==='rejected'))return json({error:'Assembly failed; retain chunks and retry'},409);
-  const object=results[1].value;
+  let object;try{[,object]=await Promise.all([produce,upload])}catch(error){
+   // Waiting for both promises deadlocks if storage rejects without consuming
+   // the stream: the producer remains blocked on backpressure forever.
+   void writer.abort(error).catch(()=>{});void stream.readable.cancel(error).catch(()=>{});
+   console.warn('Media assembly failed',{copied,count,errorName:error?.name||'Error'});
+   return json({error:'Assembly failed; retain chunks and retry'},409);
+  }
   try{await env.BUCKET.delete(Array.from({length:count},(_,i)=>'staging/'+body.sha256+'/'+i))}catch{}
   return json({ok:true,key,size:object.size,sha256:body.sha256});
  }

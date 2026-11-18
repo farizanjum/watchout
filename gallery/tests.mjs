@@ -14,6 +14,22 @@ test('resumable chunks assemble original bytes, verify hash and preserve immutab
 test('missing or corrupt chunks never create a final media object',async()=>{
  for(const corrupt of [false,true]){const env={UPLOAD_TOKEN:'secret',BUCKET:chunkBucket()},sha='a'.repeat(64);if(corrupt)env.BUCKET.values.set('staging/'+sha+'/0',{bytes:new Uint8Array([1,2,3]),size:3});const r=await worker.fetch(new Request('https://test/api/assemble/batch/bad.mp4',{method:'POST',headers:{authorization:'Bearer secret'},body:JSON.stringify({size:3,sha256:sha,chunkSize:131072})}),env);assert.equal(r.status,409);assert.equal(env.BUCKET.values.has('clips/batch/bad.mp4'),false)}
 });
+test('assembly returns promptly when storage rejects without consuming the stream',async()=>{
+ const bucket=chunkBucket(),bytes=new Uint8Array(131089),sha=checksum(bytes);
+ for(let i=0;i<2;i++){const part=bytes.slice(i*131072,(i+1)*131072);bucket.values.set('staging/'+sha+'/'+i,{bytes:part,size:part.length})}
+ bucket.put=async()=>{throw Error('Storage unavailable')};
+ let timer;const timeout=new Promise(resolve=>{timer=setTimeout(()=>resolve('timeout'),300)});
+ const result=await Promise.race([worker.fetch(new Request('https://test/api/assemble/batch/retry.mp4',{method:'POST',headers:{authorization:'Bearer secret'},body:JSON.stringify({size:bytes.length,sha256:sha,chunkSize:131072})}),{UPLOAD_TOKEN:'secret',BUCKET:bucket}),timeout]);clearTimeout(timer);
+ assert.notEqual(result,'timeout');assert.equal(result.status,409);assert.equal(bucket.values.size,2);
+});
+test('assembly reads at most four parts concurrently and preserves byte order',async()=>{
+ const bucket=chunkBucket(),bytes=new Uint8Array(131072*8+19).map((_,i)=>i%251),sha=checksum(bytes);
+ for(let i=0;i<9;i++){const part=bytes.slice(i*131072,(i+1)*131072);bucket.values.set('staging/'+sha+'/'+i,{bytes:part,size:part.length})}
+ const get=bucket.get;let active=0,maximum=0;
+ bucket.get=async key=>{active++;maximum=Math.max(maximum,active);await new Promise(resolve=>setTimeout(resolve,3));const part=await get(key);active--;return part};
+ const result=await worker.fetch(new Request('https://test/api/assemble/batch/ordered.mp4',{method:'POST',headers:{authorization:'Bearer secret'},body:JSON.stringify({size:bytes.length,sha256:sha,chunkSize:131072})}),{UPLOAD_TOKEN:'secret',BUCKET:bucket});
+ assert.equal(result.status,200);assert.equal(maximum,4);assert.deepEqual(bucket.values.get('clips/batch/ordered.mp4').bytes,bytes);assert.equal(bucket.values.size,1);
+});
 test('longer original exports allow120MiB while bounding assembly below1000 storage reads',async()=>{
  const sha='a'.repeat(64),env={UPLOAD_TOKEN:'secret',BUCKET:{head:async()=>({size:120*1024*1024,customMetadata:{sha256:sha}})}};
  const req=size=>new Request('https://test/api/assemble/batch/long.mp4',{method:'POST',headers:{authorization:'Bearer secret'},body:JSON.stringify({size,sha256:sha,chunkSize:131072})});

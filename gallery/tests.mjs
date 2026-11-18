@@ -23,6 +23,21 @@ test('studio is public while channel configuration and publishing remain private
 test('video byte ranges support seek, suffix, and invalid requests',()=>{assert.deepEqual(parseRange('bytes=10-19',100),{offset:10,length:10});assert.deepEqual(parseRange('bytes=90-',100),{offset:90,length:10});assert.deepEqual(parseRange('bytes=-12',100),{offset:88,length:12});assert.equal(parseRange('bytes=110-',100),false);assert.equal(parseRange('bytes=20-10',100),false);assert.equal(parseRange('bytes=0-1,3-4',100),false)});
 test('public upload and catalog writes require secret',async()=>{for(const path of ['/api/upload/episode/one.mp4','/api/catalog']){const r=await worker.fetch(new Request('https://test'+path,{method:'PUT',body:'x'}),{UPLOAD_TOKEN:'secret',BUCKET:{}});assert.equal(r.status,401)}});
 
+const galleryClip=id=>({id,title:id,caption:'A caption',file:'batch/'+id+'.mp4',poster:'batch/'+id+'.jpg'});
+function catalogBucket(initial,uploaded={}){let catalog=structuredClone(initial);return {read:()=>catalog,get:async key=>key==='catalog.json'?{json:async()=>structuredClone(catalog)}:null,head:async key=>({uploaded:uploaded[key]||null}),put:async(key,value)=>{assert.equal(key,'catalog.json');catalog=JSON.parse(value)}}}
+test('gallery returns newest additions first, recovering legacy dates from media',async()=>{
+ const bucket=catalogBucket([{...galleryClip('old'),addedAt:'2026-01-01T00:00:00Z'},galleryClip('legacy'),{...galleryClip('new'),addedAt:'2026-03-01T00:00:00Z'},galleryClip('unknown')],{'clips/batch/legacy.mp4':new Date('2026-02-01T00:00:00Z')});
+ const r=await worker.fetch(new Request('https://test/api/clips'),{BUCKET:bucket});assert.equal(r.status,200);const clips=await r.json();assert.deepEqual(clips.map(c=>c.id),['new','legacy','old','unknown']);assert.equal(clips[1].addedAtSource,'media-upload');assert.equal(clips[3].addedAt,null);
+});
+test('catalog writes preserve first addition dates and never promote caption edits',async()=>{
+ const old={...galleryClip('old'),addedAt:'2026-01-01T00:00:00.000Z',addedAtSource:'catalog'},legacy=galleryClip('legacy');
+ const bucket=catalogBucket([old,legacy],{'clips/batch/legacy.mp4':new Date('2026-02-01T00:00:00Z')});const env={BUCKET:bucket,UPLOAD_TOKEN:'secret'};
+ const put=data=>worker.fetch(new Request('https://test/api/catalog',{method:'PUT',headers:{authorization:'Bearer secret'},body:JSON.stringify(data)}),env);
+ assert.equal((await put([{...old,caption:'Edited',addedAt:'2099-01-01T00:00:00Z'},legacy,{...galleryClip('new'),addedAt:'2000-01-01T00:00:00Z'}])).status,200);
+ const saved=bucket.read();assert.deepEqual(saved.map(c=>c.id),['new','legacy','old']);assert.equal(saved[2].addedAt,old.addedAt);assert.equal(saved[1].addedAt,'2026-02-01T00:00:00.000Z');assert.ok(Math.abs(Date.now()-Date.parse(saved[0].addedAt))<5000);
+ const first=saved[0].addedAt;assert.equal((await put(saved.map(({addedAt,addedAtSource,...c})=>c))).status,200);assert.equal(bucket.read()[0].addedAt,first);assert.equal(bucket.read()[2].caption,'Edited');
+});
+
 test('media import requires authentication and rejects arbitrary source hosts',async()=>{
  const req=(url,auth)=>new Request('https://test/api/import/batch/one.mp4',{method:'POST',headers:{'content-type':'application/json',...(auth?{authorization:'Bearer secret'}:{})},body:JSON.stringify({url,size:4,sha256:'a'.repeat(64)})});const env={UPLOAD_TOKEN:'secret',BUCKET:{}};
  assert.equal((await worker.fetch(req('https://media.zernio.com/temp/a.mp4',false),env)).status,401);

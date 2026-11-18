@@ -28,4 +28,6 @@ The script needs Node 20+. It uploads exact original export bytes, checks stored
 
 Verify anonymous access, playback and seeking, attachment download headers, and copied captions. Download must return the original MP4, not a preview or transcoded copy. Test a full downloaded file's SHA-256 against the export. Clipboard permission depends on the visitor's browser; keep Copy Caption and manual text selection available. Publish only reviewed clips.
 
+Show newly added clips first. Record a server-owned `addedAt` on first catalog insertion and preserve it across caption edits, scheduling, retries and catalog merges. Do not sort by filename, clip ID or scheduled publication time. For legacy clips without insertion timestamps, use the stored media upload time as an explicitly labeled fallback (`addedAtSource: media-upload`); do not invent historical insertion times. Persist recovered dates during the next authenticated catalog update so ordinary gallery reads stay fast. Unknown dates sort after dated clips with a deterministic tie-break.
+
 Optional reviewed YouTube publishing is included. Read `youtube-publishing.md` before configuring it. The public gallery must never expose the owner's provider key or channel controls.

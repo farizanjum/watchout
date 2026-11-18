@@ -4,6 +4,17 @@ const BRAND_ASSETS=__BRAND_ASSETS__;
 const STUDIO=__STUDIO__;
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
 const mediaKey=p=>/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.(mp4|jpg)$/.test(p)&&!p.includes('..');
+const validDate=value=>value!=null&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():null;
+const newestFirst=clips=>clips.sort((a,b)=>(Date.parse(b.addedAt)||0)-(Date.parse(a.addedAt)||0)||b.id.localeCompare(a.id));
+async function datedCatalog(clips,bucket){
+ const dated=[];
+ for(let i=0;i<clips.length;i+=6)dated.push(...await Promise.all(clips.slice(i,i+6).map(async c=>{
+  const addedAt=validDate(c.addedAt);if(addedAt)return {...c,addedAt};
+  const uploaded=mediaKey(c.file)?validDate((await bucket.head('clips/'+c.file))?.uploaded):null;
+  return {...c,addedAt:uploaded,addedAtSource:uploaded?'media-upload':'unknown'};
+ })));
+ return newestFirst(dated);
+}
 export function parseRange(value,size){
  if(!value)return null;
  const m=/^bytes=(\d*)-(\d*)$/.exec(value);if(!m||(!m[1]&&!m[2]))return false;
@@ -55,7 +66,8 @@ export default {async fetch(request,env){
   return json({ok:true,key,size:object.size,sha256:body.sha256});
  }
  if(path==='/api/clips'&&['GET','HEAD'].includes(request.method)){
-  const catalog=await env.BUCKET.get('catalog.json');return new Response(request.method==='HEAD'?null:(catalog?.body||'[]'),{headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}})
+  if(request.method==='HEAD')return new Response(null,{headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
+  const catalog=await env.BUCKET.get('catalog.json');return json(await datedCatalog(catalog?await catalog.json():[],env.BUCKET));
  }
  if(path.startsWith('/api/upload/')&&request.method==='PUT'){
   if(!await authorized(request,env))return json({error:'Unauthorized'},401);
@@ -83,10 +95,17 @@ export default {async fetch(request,env){
   if(!await authorized(request,env))return json({error:'Unauthorized'},401);
   if(Number(request.headers.get('content-length'))>2*1024*1024)return json({error:'Catalog too large'},413);
   const data=await request.json();if(!Array.isArray(data)||data.length>1000)return json({error:'Invalid catalog'},400);
-  const ids=new Set();for(const c of data){if(!c||typeof c.id!=='string'||ids.has(c.id)||!mediaKey(c.file)||!mediaKey(c.poster)||typeof c.caption!=='string'||!c.caption.trim()||c.caption.length>2200||typeof c.title!=='string')return json({error:'Invalid clip'},400);ids.add(c.id);if(!await env.BUCKET.head('clips/'+c.file)||!await env.BUCKET.head('clips/'+c.poster))return json({error:'Upload media before publishing'},409)}
+  const ids=new Set(),media=new Map();for(const c of data){if(!c||typeof c.id!=='string'||ids.has(c.id)||!mediaKey(c.file)||!mediaKey(c.poster)||typeof c.caption!=='string'||!c.caption.trim()||c.caption.length>2200||typeof c.title!=='string')return json({error:'Invalid clip'},400);ids.add(c.id);const video=await env.BUCKET.head('clips/'+c.file);if(!video||!await env.BUCKET.head('clips/'+c.poster))return json({error:'Upload media before publishing'},409);media.set(c.file,video)}
   const prior=await env.BUCKET.get('catalog.json');const old=prior?await prior.json():[];
   if(old.some(c=>!ids.has(c.id)))return json({error:'Existing clips must be preserved'},409);
-  await env.BUCKET.put('catalog.json',JSON.stringify(data),{httpMetadata:{contentType:'application/json'}});return json({ok:true,count:data.length});
+  const byId=new Map(old.map(c=>[c.id,c])),now=new Date().toISOString(),dated=[];
+  for(const c of data){
+   const previous=byId.get(c.id);let addedAt=validDate(previous?.addedAt),addedAtSource=previous?.addedAtSource||'catalog';
+   if(!previous){addedAt=now;addedAtSource='catalog'}
+   else if(!addedAt){const object=media.get(previous.file)||await env.BUCKET.head('clips/'+previous.file);addedAt=validDate(object?.uploaded);addedAtSource=addedAt?'media-upload':'unknown'}
+   dated.push({...c,addedAt,addedAtSource});
+  }
+  await env.BUCKET.put('catalog.json',JSON.stringify(newestFirst(dated)),{httpMetadata:{contentType:'application/json'}});return json({ok:true,count:data.length});
  }
  if(path.startsWith('/media/')&&['GET','HEAD'].includes(request.method)){
   const key=path.slice(7);if(!mediaKey(key))return new Response('Not found',{status:404});

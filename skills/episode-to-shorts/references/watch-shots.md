@@ -30,4 +30,6 @@ Verify anonymous access, playback and seeking, attachment download headers, and 
 
 Show newly added clips first. Record a server-owned `addedAt` on first catalog insertion and preserve it across caption edits, scheduling, retries and catalog merges. Do not sort by filename, clip ID or scheduled publication time. For legacy clips without insertion timestamps, use the stored media upload time as an explicitly labeled fallback (`addedAtSource: media-upload`); do not invent historical insertion times. Persist recovered dates during the next authenticated catalog update so ordinary gallery reads stay fast. Unknown dates sort after dated clips with a deterministic tie-break.
 
+Verify the rendered card order in a browser, not just the API array. Client insertion code can silently restore alphabetical ID order even when the server response is correct. Reconcile existing cards to the response order on every refresh, including when new clips arrive; preserve existing video elements and avoid moving unchanged cards. Test both a fresh page and an already-open gallery after refresh.
+
 Optional reviewed YouTube publishing is included. Read `youtube-publishing.md` before configuring it. The public gallery must never expose the owner's provider key or channel controls.

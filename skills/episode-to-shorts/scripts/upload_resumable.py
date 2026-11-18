@@ -18,8 +18,9 @@ def assemble(url,headers,payload):
   time.sleep(2**attempt)
  raise RuntimeError('Assembly did not complete; verified chunks retained')
 
-def upload_file(file,key,token,origin,workers=8):
- file=Path(file);size=file.stat().st_size;sha=hashlib.file_digest(file.open('rb'),'sha256').hexdigest()
+def upload_file(file,key,token,origin,workers=8,stage_only=False):
+ file=Path(file);size=file.stat().st_size
+ with file.open('rb') as source:sha=hashlib.file_digest(source,'sha256').hexdigest()
  if not 0<size<=120*1024*1024:raise ValueError('Chunk assembly supports up to120MiB')
  headers={'Authorization':'Bearer '+token,'Connection':'close'}
  remote=requests.head(origin.rstrip('/')+'/media/'+key,timeout=30)
@@ -30,6 +31,11 @@ def upload_file(file,key,token,origin,workers=8):
   digest=hashlib.sha256(data).hexdigest()
   for attempt in range(4):
    try:
+    prior=requests.head(origin.rstrip('/')+'/api/chunks/'+sha+'/'+str(index),headers=headers,timeout=(15,30))
+    if prior.ok:
+     if int(prior.headers.get('content-length',0))!=len(data) or prior.headers.get('x-content-sha256')!=digest:raise ValueError('Stored chunk differs from approved bytes')
+     return index
+    if prior.status_code!=404:prior.raise_for_status()
     r=requests.put(origin.rstrip('/')+'/api/chunks/'+sha+'/'+str(index),headers={**headers,'Content-Type':'application/octet-stream','x-content-sha256':digest,'Content-Length':str(len(data))},data=data,timeout=(15,45))
     if r.status_code in [400,401,403,409]:raise ValueError('Chunk rejected: '+str(r.status_code))
     r.raise_for_status();return index
@@ -45,6 +51,7 @@ def upload_file(file,key,token,origin,workers=8):
   except BaseException:
    for pending in futures:pending.cancel()
    raise
+ if stage_only:return {'key':key,'size':size,'sha256':sha,'staged':True}
  assemble(origin.rstrip('/')+'/api/assemble/'+key,headers,{'sha256':sha,'size':size,'chunkSize':CHUNK})
  remote=requests.get(origin.rstrip('/')+'/media/'+key,stream=True,timeout=90);remote.raise_for_status();digest=hashlib.sha256();received=0
  for data in remote.iter_content(1024*1024):digest.update(data);received+=len(data)
@@ -53,7 +60,7 @@ def upload_file(file,key,token,origin,workers=8):
  return {'key':key,'size':size,'sha256':sha}
 if __name__=='__main__':
  import argparse,json,os
- p=argparse.ArgumentParser();p.add_argument('file');p.add_argument('key');p.add_argument('--origin',required=True);p.add_argument('--token-env',default='WATCHOUT_UPLOAD_TOKEN');p.add_argument('--workers',type=int,default=8,choices=range(1,17));a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('file');p.add_argument('key');p.add_argument('--origin',required=True);p.add_argument('--token-env',default='WATCHOUT_UPLOAD_TOKEN');p.add_argument('--workers',type=int,default=8,choices=range(1,17));p.add_argument('--stage-only',action='store_true');a=p.parse_args()
  if not a.origin.startswith('https://'):raise SystemExit('Use the HTTPS gallery origin')
  token=os.environ[a.token_env]
- print(json.dumps(upload_file(a.file,a.key,token,a.origin,a.workers)))
+ print(json.dumps(upload_file(a.file,a.key,token,a.origin,a.workers,a.stage_only)))

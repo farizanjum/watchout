@@ -2,6 +2,22 @@
 from pathlib import Path
 import concurrent.futures,hashlib,requests,time
 CHUNK=131072
+def assemble(url,headers,payload):
+ # Immutable target keys and verified content hashes make retrying assembly safe.
+ # Retry only temporary assembly/server failures; identity conflicts must stop.
+ for attempt in range(3):
+  try:
+   response=requests.post(url,headers=headers,json=payload,timeout=(20,240))
+   if response.ok:return response
+   try:message=response.json().get('error','')
+   except ValueError:message=''
+   transient=response.status_code>=500 or (response.status_code==409 and message=='Assembly failed; retain chunks and retry')
+   if not transient or attempt==2:response.raise_for_status()
+  except (requests.Timeout,requests.ConnectionError):
+   if attempt==2:raise
+  time.sleep(2**attempt)
+ raise RuntimeError('Assembly did not complete; verified chunks retained')
+
 def upload_file(file,key,token,origin,workers=8):
  file=Path(file);size=file.stat().st_size;sha=hashlib.file_digest(file.open('rb'),'sha256').hexdigest()
  if not 0<size<=120*1024*1024:raise ValueError('Chunk assembly supports up to120MiB')
@@ -29,7 +45,7 @@ def upload_file(file,key,token,origin,workers=8):
   except BaseException:
    for pending in futures:pending.cancel()
    raise
- r=requests.post(origin.rstrip('/')+'/api/assemble/'+key,headers=headers,json={'sha256':sha,'size':size,'chunkSize':CHUNK},timeout=(20,240));r.raise_for_status()
+ assemble(origin.rstrip('/')+'/api/assemble/'+key,headers,{'sha256':sha,'size':size,'chunkSize':CHUNK})
  remote=requests.get(origin.rstrip('/')+'/media/'+key,stream=True,timeout=90);remote.raise_for_status();digest=hashlib.sha256();received=0
  for data in remote.iter_content(1024*1024):digest.update(data);received+=len(data)
  if received!=size or digest.hexdigest()!=sha:raise RuntimeError('Final remote bytes differ from approved export')

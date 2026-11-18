@@ -44,3 +44,5 @@ python scripts/render.py --source "C:\job\work\source.mkv" --manifest "C:\job\ed
 ```
 
 Requirements: Python 3.11+, FFmpeg/ffprobe, yt-dlp, and requests. Source acquisition and rendering are local. Transcription uses the selected provider account. The scripts never create API keys or subscriptions.
+
+For a wide facecam with rapid movement, a split part can include `"fit_regions": [false, true]`. This preserves the second rectangle without distortion inside its panel using blurred fill. Review the entire original facecam rectangle; exclude source overlay slivers.

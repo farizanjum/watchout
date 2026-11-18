@@ -12,6 +12,11 @@ def manifest():
       'parts':[{'source_start':0,'source_end':2,'start':0,'end':2,'mode':'solo','rects':[[600,1080,660,0]],'required_subjects':['host'],'subject_review':{'approved':True,'evidence':'Synthetic test fixture, not a real editorial approval','regions':[['host']]}}]}
 
 class GuardTests(unittest.TestCase):
+    def test_caption_phrase_does_not_mix_speakers(self):
+        words=[{'start':0,'end':.2,'text':'Money,','speaker':'npc'}, {'start':.21,'end':.4,'text':'asshole-','speaker':'npc'}, {'start':.41,'end':.5,'text':'Oh,','speaker':'streamer'}, {'start':.51,'end':.7,'text':'hell.','speaker':'streamer'}]
+        groups=group_words(words)
+        self.assertEqual([[w['speaker'] for w in g] for g in groups],[['npc','npc'],['streamer','streamer']])
+
     def test_background_subject_and_missing_speaker_rejected(self):
         m=manifest();self.assertTrue(validate_subjects(m))
         m['parts'][0]['subject_review']['regions']=[['guard']]

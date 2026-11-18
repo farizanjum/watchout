@@ -11,6 +11,8 @@ This is an agent-readable workflow, not an autonomous clip picker. Any assistant
 
 Publishing is optional. When explicitly requested, use a destination owned by the user, preserve existing clips, and follow `references/watch-shots.md`. Never upload to the original author's account or assume that installing this skill authorizes public publication.
 
+For live gaming streams and hourly batches, read `references/livestreams.md`. The latest requested formats take priority: use `--format vertical` for 9:16-only delivery.
+
 ## Editorial decisions
 
 Read the whole episode transcript before choosing highlights. Inspect the source video throughout and review candidate scenes at their actual boundaries. Look for self-contained setups and payoffs, character interactions, personal stories, emotion, and varied tone. Avoid selecting fifteen versions of the same joke. A funny excerpt that needs unseen context is not ready to clip.

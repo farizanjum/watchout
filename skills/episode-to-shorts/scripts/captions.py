@@ -8,6 +8,8 @@ def group_words(words):
     groups=[];current=[]
     payoff_starts={'tony','arijit','honey','r15','filmmaker','ghar','work'}
     for w in words:
+        if current and w.get('speaker') is not None and current[-1].get('speaker') is not None and w['speaker']!=current[-1]['speaker']:
+            groups.append(current);current=[]
         if current and w['text'].lower().strip('.,!?') in payoff_starts:
             groups.append(current);current=[]
         if current and (len(current)>=4 or len(' '.join(x['text'] for x in current))+len(w['text'])>27 or w['start']-current[-1]['end']>.38 or w['end']-current[0]['start']>1.8):

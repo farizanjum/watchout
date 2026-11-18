@@ -31,6 +31,7 @@ def validate(m):
             if abs(p['source_start']-cursor)>eps or p['source_end']>b+eps or p['source_end']<=p['source_start']:raise ValueError('Parts do not exactly partition kept intervals')
             if p['mode'] not in ['solo','split']:raise ValueError('Unknown layout mode')
             if len(p['rects'])!=(2 if p['mode']=='split' else 1):raise ValueError('Wrong number of crop rectangles')
+            if 'fit_regions' in p and (p['mode']!='split' or len(p['fit_regions'])!=2 or any(type(v) is not bool for v in p['fit_regions'])):raise ValueError('fit_regions requires two boolean flags in a split layout')
             for w,h,x,y in p['rects']:
                 if min(w,h)<=0 or min(x,y)<0 or x+w>m.get('source_width',3840)+1 or y+h>m.get('source_height',2160)+1:raise ValueError('Crop is outside source dimensions')
             cursor=p['source_end'];pi+=1
@@ -77,7 +78,14 @@ def render(a):
                 part=job/f'part_{digest}.mp4';files.append(part)
                 if part.exists() and part.stat().st_size>10000:continue
                 if p['mode']=='split':
-                    flt=f'[0:v]split=2[a][b];[a]crop={rect(p["rects"][0])},scale=1080:960:flags=lanczos,setsar=1[ao];[b]crop={rect(p["rects"][1])},scale=1080:960:flags=lanczos,setsar=1[bo];[ao][bo]vstack=2[v]'
+                    filters=['[0:v]split=2[a][b]']
+                    for index,label in enumerate(['a','b']):
+                        crop=rect(p['rects'][index])
+                        if p.get('fit_regions',[False,False])[index]:
+                            # Preserve the complete moving facecam; never stretch it to a portrait panel.
+                            filters.extend([f'[{label}]crop={crop},split=2[{label}bg][{label}fg]',f'[{label}bg]scale=1080:960:force_original_aspect_ratio=increase,crop=1080:960,boxblur=16:2,setsar=1[{label}blur]',f'[{label}fg]scale=1080:960:force_original_aspect_ratio=decrease,setsar=1[{label}fit]',f'[{label}blur][{label}fit]overlay=(W-w)/2:(H-h)/2,setsar=1[{label}o]'])
+                        else:filters.append(f'[{label}]crop={crop},scale=1080:960:flags=lanczos,setsar=1[{label}o]')
+                    filters.append('[ao][bo]vstack=2[v]');flt=';'.join(filters)
                 else:flt=f'[0:v]crop={rect(p["rects"][0])},scale=1080:1920:flags=lanczos,setsar=1[v]'
                 pending=part.with_name(part.stem+'.rendering.mp4')
                 run(base+['-ss',str(start+p['source_start']),'-i',str(a.source),'-t',str(p['source_end']-p['source_start']),'-filter_complex_threads','1','-filter_complex',flt,'-map','[v]','-an']+enc+[str(pending)],job)

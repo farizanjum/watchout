@@ -56,3 +56,27 @@ test('exactly 180-second square video remains Shorts eligible',async()=>{
  const {env,calls,transport}=await fixture();const clips=await (await env.BUCKET.get('catalog.json')).json();Object.assign(clips[0],{width:1080,height:1080,duration:180});await env.BUCKET.put('catalog.json',JSON.stringify(clips));
  assert.equal((await publisherApi(request('publish',payload),env,transport)).status,200);assert.ok(calls.some(c=>c.init?.method==='POST'));
 });
+
+test('scoped automation can only publish QA-passed batch clips or check their status',async()=>{
+ const {env,calls,transport}=await fixture();Object.assign(env,{AUTOMATION_PUBLISH_TOKEN:'test-service-secret',AUTOMATION_CLIP_PREFIX:'one',AUTOMATION_EXPIRES_AT:new Date(Date.now()+3600000).toISOString()});
+ const service=(path,body)=>{const r=request(path,body,false);r.headers.set('authorization','Bearer test-service-secret');r.headers.delete('origin');r.headers.delete('x-watchout-intent');return r};
+ for(const path of ['config','accounts','statuses'])assert.equal((await publisherApi(service(path),env,transport)).status,403);
+ assert.equal((await publisherApi(service('publish',{...payload,clipId:'other'}),env,transport)).status,403);
+ assert.equal((await publisherApi(service('status?clipId=other'),env,transport)).status,403);
+ assert.equal((await publisherApi(service('publish',payload),env,transport)).status,409);
+ const clips=await (await env.BUCKET.get('catalog.json')).json();clips[0].qa={status:'pass',videoSha256:'a'.repeat(64),manifestSha256:'b'.repeat(64)};await env.BUCKET.put('catalog.json',JSON.stringify(clips));
+ assert.equal((await publisherApi(service('publish',payload),env,transport)).status,200);
+ assert.equal((await publisherApi(service('status?clipId=one'),env,transport)).status,200);
+ env.AUTOMATION_EXPIRES_AT=new Date(Date.now()-1000).toISOString();assert.equal((await publisherApi(service('publish',payload),env,transport)).status,403);
+});
+
+test('direct fallback adoption verifies channel and exact media and prevents a duplicate publish',async()=>{
+ const {env}=await fixture();const bytes=new Uint8Array([1,2,3,4]);const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
+ const clips=await (await env.BUCKET.get('catalog.json')).json();Object.assign(clips[0],{sha256:sha,qa:{status:'pass',videoSha256:sha},externalPublication:{postId:'a'.repeat(24),videoSha256:sha}});await env.BUCKET.put('catalog.json',JSON.stringify(clips));env.BUCKET.head=async()=>({size:4,customMetadata:{sha256:sha}});
+ let account='wrong',corrupt=false,posts=0;
+ const transport=async(url,init={})=>{if(init.method==='POST')posts++;if(url.includes('/accounts'))return Response.json({accounts:[{_id:'channel-1',platform:'youtube'}]});if(url.startsWith('https://media.zernio.com/'))return new Response(corrupt?new Uint8Array([4,3,2,1]):bytes,{headers:{'content-length':'4'}});return Response.json({post:{_id:'a'.repeat(24),content:'Original',status:'published',mediaItems:[{type:'video',url:'https://media.zernio.com/temp/test.mp4'}],platforms:[{platform:'youtube',accountId:account,status:'published',platformPostUrl:'https://youtube.com/watch?v=existing'}]}})};
+ assert.equal((await publisherApi(request('status?clipId=one'),env,transport)).status,409);
+ account='channel-1';corrupt=true;assert.equal((await publisherApi(request('status?clipId=one'),env,transport)).status,409);
+ corrupt=false;let r=await publisherApi(request('status?clipId=one'),env,transport);assert.equal((await r.json()).status,'published');
+ r=await publisherApi(request('publish',payload),env,transport);assert.equal((await r.json()).postId,'a'.repeat(24));assert.equal(posts,0);
+});

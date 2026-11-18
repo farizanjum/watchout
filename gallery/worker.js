@@ -26,6 +26,34 @@ export default {async fetch(request,env){
   return new Response(STUDIO,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'}});
  }
  if(path==='/health')return json({ok:true,storage:!!env.BUCKET});
+ if(path.startsWith('/api/chunks/')&&['PUT','HEAD'].includes(request.method)){
+  if(!await authorized(request,env))return json({error:'Unauthorized'},401);
+  const match=/^\/api\/chunks\/([a-f0-9]{64})\/(\d{1,3})$/.exec(path);if(!match)return json({error:'Invalid chunk'},400);
+  const key='staging/'+match[1]+'/'+Number(match[2]);const prior=await env.BUCKET.head(key);
+  if(request.method==='HEAD')return new Response(null,{status:prior?200:404,headers:prior?{'content-length':String(prior.size),'x-content-sha256':prior.customMetadata?.sha256||''}:{}});
+  const size=Number(request.headers.get('content-length')),sha=request.headers.get('x-content-sha256');
+  if(!Number.isSafeInteger(size)||size<=0||size>131072||!/^[a-f0-9]{64}$/.test(sha||''))return json({error:'Invalid chunk size or hash'},400);
+  if(prior)return prior.size===size&&prior.customMetadata?.sha256===sha?json({ok:true}):json({error:'Chunk differs'},409);
+  await env.BUCKET.put(key,request.body,{sha256:sha,customMetadata:{sha256:sha}});return json({ok:true});
+ }
+ if(path.startsWith('/api/assemble/')&&request.method==='POST'){
+  if(!await authorized(request,env))return json({error:'Unauthorized'},401);
+  const key=path.slice('/api/assemble/'.length),body=await request.json();
+  if(!mediaKey(key)||!Number.isSafeInteger(body.size)||body.size<=0||body.size>64*1024*1024||body.chunkSize!==131072||!/^[a-f0-9]{64}$/.test(body.sha256||''))return json({error:'Invalid assembly'},400);
+  const prior=await env.BUCKET.head('clips/'+key);
+  if(prior)return prior.size===body.size&&prior.customMetadata?.sha256===body.sha256?json({ok:true,key,size:prior.size,sha256:body.sha256}):json({error:'Immutable media key exists'},409);
+  const count=Math.ceil(body.size/body.chunkSize),stream=new FixedLengthStream(body.size),writer=stream.writable.getWriter();
+  const produce=(async()=>{try{for(let i=0;i<count;i++){
+   const part=await env.BUCKET.get('staging/'+body.sha256+'/'+i),expected=Math.min(body.chunkSize,body.size-i*body.chunkSize);
+   if(!part||part.size!==expected)throw Error('Missing or incorrect chunk');
+   const reader=part.body.getReader();try{while(true){const {value,done}=await reader.read();if(done)break;await writer.write(value)}}finally{reader.releaseLock()}
+  }await writer.close()}catch(error){await writer.abort(error);throw error}})();
+  const upload=env.BUCKET.put('clips/'+key,stream.readable,{sha256:body.sha256,httpMetadata:{contentType:key.endsWith('.mp4')?'video/mp4':'image/jpeg'},customMetadata:{sha256:body.sha256}});
+  const results=await Promise.allSettled([produce,upload]);if(results.some(r=>r.status==='rejected'))return json({error:'Assembly failed; retain chunks and retry'},409);
+  const object=results[1].value;
+  try{await env.BUCKET.delete(Array.from({length:count},(_,i)=>'staging/'+body.sha256+'/'+i))}catch{}
+  return json({ok:true,key,size:object.size,sha256:body.sha256});
+ }
  if(path==='/api/clips'&&['GET','HEAD'].includes(request.method)){
   const catalog=await env.BUCKET.get('catalog.json');return new Response(request.method==='HEAD'?null:(catalog?.body||'[]'),{headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}})
  }
@@ -37,6 +65,19 @@ export default {async fetch(request,env){
   const type=key.endsWith('.mp4')?'video/mp4':'image/jpeg';
   const object=await env.BUCKET.put('clips/'+key,request.body,{sha256:sha,httpMetadata:{contentType:type},customMetadata:{sha256:sha}});
   return json({ok:true,key,size:object.size,sha256:sha});
+ }
+ if(path.startsWith('/api/import/')&&request.method==='POST'){
+  if(!await authorized(request,env))return json({error:'Unauthorized'},401);
+  const key=path.slice('/api/import/'.length);if(!mediaKey(key))return json({error:'Invalid file key'},400);
+  const body=await request.json();let source;try{source=new URL(body.url)}catch{return json({error:'Invalid media URL'},400)}
+  if(source.protocol!=='https:'||source.hostname!=='media.zernio.com'||source.username||source.password||source.search)return json({error:'Use a public Zernio media URL'},400);
+  if(!/^[a-f0-9]{64}$/.test(body.sha256||'')||!Number.isSafeInteger(body.size)||body.size<=0||body.size>150*1024*1024)return json({error:'Verified size and SHA-256 required'},400);
+  const prior=await env.BUCKET.head('clips/'+key);
+  if(prior)return prior.size===body.size&&prior.customMetadata?.sha256===body.sha256?json({ok:true,key,size:prior.size,sha256:body.sha256}):json({error:'Immutable media key already exists'},409);
+  const remote=await fetch(source.href,{redirect:'error',signal:AbortSignal.timeout(120000)});
+  if(!remote.ok||Number(remote.headers.get('content-length'))!==body.size)return json({error:'Source media size mismatch'},409);
+  const object=await env.BUCKET.put('clips/'+key,remote.body,{sha256:body.sha256,httpMetadata:{contentType:key.endsWith('.mp4')?'video/mp4':'image/jpeg'},customMetadata:{sha256:body.sha256}});
+  return json({ok:true,key,size:object.size,sha256:body.sha256});
  }
  if(path==='/api/catalog'&&request.method==='PUT'){
   if(!await authorized(request,env))return json({error:'Unauthorized'},401);

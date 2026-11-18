@@ -4,6 +4,11 @@ const pubJson=(data,status=200)=>new Response(JSON.stringify(data),{status,heade
 export function isPublisherOwner(req,env){
  return env.AUTH_PROVIDER==='chatgpt-sites'&&!!env.PUBLISHER_OWNER_EMAIL&&!!req.headers.get('oai-authenticated-user-id')&&req.headers.get('oai-authenticated-user-email')?.toLowerCase()===env.PUBLISHER_OWNER_EMAIL.toLowerCase();
 }
+async function isAutomationPublisher(req,env){
+ if(!env.AUTOMATION_PUBLISH_TOKEN||!env.AUTOMATION_CLIP_PREFIX||!Number.isFinite(Date.parse(env.AUTOMATION_EXPIRES_AT))||Date.parse(env.AUTOMATION_EXPIRES_AT)<=Date.now())return false;
+ const supplied=req.headers.get('authorization')||'',expected='Bearer '+env.AUTOMATION_PUBLISH_TOKEN;
+ if(supplied.length!==expected.length)return false;let diff=0;for(let i=0;i<expected.length;i++)diff|=supplied.charCodeAt(i)^expected.charCodeAt(i);return diff===0;
+}
 const encode64=bytes=>btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const decode64=text=>Uint8Array.from(atob(text),c=>c.charCodeAt(0));
 async function cipherKey(env){if(!/^[a-f0-9]{64}$/.test(env.PUBLISHER_CIPHER_KEY||''))throw Error('Publisher encryption is not configured');return crypto.subtle.importKey('raw',Uint8Array.from(env.PUBLISHER_CIPHER_KEY.match(/../g),v=>parseInt(v,16)),{name:'AES-GCM'},false,['encrypt','decrypt'])}
@@ -53,6 +58,24 @@ function postSummary(result){
 }
 const manageable=r=>!!r.postId&&(r.status==='cancelled'||r.status==='scheduled'&&Date.parse(r.scheduledFor)>Date.now()+60000);
 const receiptView=r=>({clipId:r.clipId,status:r.status,postId:r.postId||null,videoUrl:r.videoUrl||null,channel:r.channel,createdAt:r.createdAt,errorCode:r.errorCode||null,review:r.review,scheduledFor:r.scheduledFor||null,timezone:r.timezone||r.review?.timezone||'Asia/Dubai',revision:r.revision||r.createdAt,canManageSchedule:manageable(r),retryAllowed:!r.postId&&!['published','failed','cancelled'].includes(r.status)&&Date.now()-Date.parse(r.createdAt)<23*3600000});
+async function adoptExternalPost(env,config,clipId,transport){
+ const catalog=await env.BUCKET.get('catalog.json');const clip=catalog?(await catalog.json()).find(c=>c.id===clipId):null;const external=clip?.externalPublication;
+ if(!external)return null;
+ if(!/^[a-f0-9]{24}$/.test(external.postId||'')||external.videoSha256!==clip.sha256||clip.qa?.status!=='pass'||clip.qa.videoSha256!==clip.sha256)throw Object.assign(Error('External publication verification is incomplete'),{status:409});
+ await verifiedShort(env,clipId);
+ const result=await provider(config.apiKey,'/posts/'+external.postId,{},transport);const post=result.data.post||result.data.data?.post;
+ const target=post?.platforms?.find(p=>p.platform==='youtube'),account=target?.accountId?._id||target?.accountId;
+ if(!result.ok||account!==config.channel.id||post.content!==clip.caption)throw Object.assign(Error('External post does not match this clip and channel'),{status:409});
+ const media=post.mediaItems?.find(m=>m.type==='video');let mediaUrl;try{mediaUrl=new URL(media?.url)}catch{throw Object.assign(Error('External post video is missing'),{status:409})}
+ if(mediaUrl.protocol!=='https:'||mediaUrl.hostname!=='media.zernio.com')throw Object.assign(Error('External post media host is not verified'),{status:409});
+ const bytes=await transport(mediaUrl.href,{redirect:'error',signal:AbortSignal.timeout(120000)});const size=Number(bytes.headers.get('content-length'));
+ if(!bytes.ok||!Number.isSafeInteger(size)||size<=0||size>64*1024*1024)throw Object.assign(Error('External post media cannot be verified'),{status:409});
+ const actual=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await bytes.arrayBuffer())),v=>v.toString(16).padStart(2,'0')).join('');
+ if(actual!==clip.sha256)throw Object.assign(Error('External post video differs from the reviewed clip'),{status:409});
+ const summary=postSummary(result.data),review={title:clip.title,caption:clip.caption,visibility:target.platformSpecificData?.visibility||'public',madeForKids:false,containsSyntheticMedia:false,delivery:summary.scheduledFor?'schedule':'now',scheduledFor:summary.scheduledFor,timezone:summary.timezone};
+ const record={clipId,channel:config.channel,createdAt:post.createdAt||new Date().toISOString(),revision:crypto.randomUUID(),mediaSha256:clip.sha256,review,external:true,...summary};
+ const key=await recordKey(config.channel.id,clipId);const saved=await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-None-Match':'*'})});return saved?record:await (await env.BUCKET.get(key)).json();
+}
 async function freshRecord(record,config,transport){
  const r=await provider(config.apiKey,'/posts/'+encodeURIComponent(record.postId),{},transport);
  if(!r.ok||!(r.data.post||r.data.data?.post))throw Object.assign(Error('Cannot verify the current post status. Refresh before changing it.'),{status:502});
@@ -67,8 +90,10 @@ async function scheduleLock(env,key){
 export async function publisherApi(req,env,transport=fetch){
  const url=new URL(req.url),path=url.pathname;
  if(path==='/api/publisher/session'&&req.method==='GET')return pubJson({owner:isPublisherOwner(req,env)});
- if(!isPublisherOwner(req,env))return pubJson({error:'Owner sign-in required'},403);
- if(req.method!=='GET'&&(req.headers.get('origin')!==url.origin||req.headers.get('x-watchout-intent')!=='owner'))return pubJson({error:'Use the owner publishing page'},403);
+ const automation=await isAutomationPublisher(req,env);
+ if(!isPublisherOwner(req,env)&&!automation)return pubJson({error:'Owner sign-in required'},403);
+ if(automation&&!((path==='/api/publisher/publish'&&req.method==='POST')||(path==='/api/publisher/status'&&req.method==='GET')))return pubJson({error:'Automation scope does not allow this action'},403);
+ if(!automation&&req.method!=='GET'&&(req.headers.get('origin')!==url.origin||req.headers.get('x-watchout-intent')!=='owner'))return pubJson({error:'Use the owner publishing page'},403);
  try{
  if(path==='/api/publisher/config'&&req.method==='GET'){
   const c=await readConfig(env);return pubJson({configured:!!c?.apiKey,channel:c?.channel||null});
@@ -91,7 +116,8 @@ export async function publisherApi(req,env,transport=fetch){
   for(const clip of catalog){const key=await recordKey(config.channel.id,clip.id),obj=await env.BUCKET.get(key);if(!obj)continue;let record=await obj.json();if(record.postId&&(record.status==='publishing'||record.status==='scheduled'&&Date.parse(record.scheduledFor)<Date.now()+60000)){try{record=await freshRecord(record,config,transport);await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-Match':obj.httpEtag})})}catch{}}records.push(receiptView(record))}return pubJson({records});
  }
  if(path==='/api/publisher/status'&&req.method==='GET'){
-  const clipId=url.searchParams.get('clipId');if(!clipId)return pubJson({error:'Choose a clip'},400);const key=await recordKey(config.channel.id,clipId),obj=await env.BUCKET.get(key);if(!obj)return pubJson({status:'not_published'});let record=await obj.json();
+  if(automation&&!url.searchParams.get('clipId')?.startsWith(env.AUTOMATION_CLIP_PREFIX))return pubJson({error:'Clip is outside the authorized batch'},403);
+  const clipId=url.searchParams.get('clipId');if(!clipId)return pubJson({error:'Choose a clip'},400);const key=await recordKey(config.channel.id,clipId),obj=await env.BUCKET.get(key);if(!obj){const adopted=await adoptExternalPost(env,config,clipId,transport);return pubJson(adopted?receiptView(adopted):{status:'not_published'})}let record=await obj.json();
   if(record.postId&&!['published','failed'].includes(record.status)){record=await freshRecord(record,config,transport);const saved=await env.BUCKET.put(key,JSON.stringify(record),{onlyIf:new Headers({'If-Match':obj.httpEtag})});if(!saved){const latest=await env.BUCKET.get(key);record=await latest.json()}}
   return pubJson(receiptView(record));
  }
@@ -118,9 +144,12 @@ export async function publisherApi(req,env,transport=fetch){
  }
  if(path==='/api/publisher/publish'&&req.method==='POST'){
   const input=await readBody(req);let timing;try{validatePublishInput(input);timing=scheduleInput(input)}catch(e){return pubJson({error:e.message},400)}
+  if(automation&&!input.clipId.startsWith(env.AUTOMATION_CLIP_PREFIX))return pubJson({error:'Clip is outside the authorized batch'},403);
   const {clip,media}=await verifiedShort(env,input.clipId);
+  if(automation&&(clip.qa?.status!=='pass'||clip.qa?.videoSha256!==clip.sha256||!/^[a-f0-9]{64}$/.test(clip.qa?.manifestSha256||'')))return pubJson({error:'This batch needs a matching final QA record before automatic publishing'},409);
   const accounts=await youtubeAccounts(config.apiKey,transport);if(!accounts.some(a=>a.id===config.channel.id))return pubJson({error:'The selected channel needs reconnecting in Zernio'},409);
   const key=await recordKey(config.channel.id,clip.id);let obj=await env.BUCKET.get(key);let record=obj?await obj.json():null;
+  if(!record&&clip.externalPublication){record=await adoptExternalPost(env,config,clip.id,transport);return pubJson(receiptView(record))}
   if(!record){
    const review={title:input.title.trim(),caption:input.caption.trim(),visibility:input.visibility,madeForKids:input.madeForKids,containsSyntheticMedia:input.containsSyntheticMedia,...timing};
    record={clipId:clip.id,channel:config.channel,createdAt:new Date().toISOString(),status:'pending',revision:crypto.randomUUID(),idempotencyKey:crypto.randomUUID(),review,mediaSha256:media.customMetadata.sha256,payload:{content:review.caption,mediaItems:[{type:'video',url:url.origin+'/media/'+clip.file}],platforms:[{platform:'youtube',accountId:config.channel.id,platformSpecificData:{title:review.title,visibility:review.visibility,madeForKids:review.madeForKids,containsSyntheticMedia:review.containsSyntheticMedia}}],...(timing.delivery==='schedule'?{scheduledFor:timing.scheduledFor,timezone:timing.timezone}:{publishNow:true})}};

@@ -4,6 +4,8 @@ Process complete hourly batches when requested. Read the whole available transcr
 
 For reaction-focused gaming clips, prioritize visible surprises, physical reactions, funny failures and unexpected interactions. Inspect the action itself; a transcript alone misses silent visual comedy. Rank candidates across batches instead of filling each hour with weaker dialogue. Keep capture, editing, independent QA and approved uploads moving in parallel, with serialized catalog merges and publication reservations.
 
+When the user requests a particular kind of joke or innuendo, search normalized transcript word text rather than timestamp strings. A search for `69` can otherwise match decimal timestamps. Treat hits as research leads until the original dialogue, visible subtitles and reaction are checked. Preserve the local setup and payoff; do not invent the joke, misattribute a background voice, or frame unrelated ambient dialogue as a response. Wild action also needs visual confirmation: leaving a stopped car and falling is not jumping from a moving car.
+
 Include mission mini-stories when requested: a clear objective, an intense chase or encounter, a funny failed attempt, or a satisfying completion. Retain chronological setup, action and payoff; do not select generic gunfire without a comprehensible objective.
 
 Persist source-specific required description hashtags in the job state. Include the user's exact requested spelling in every relevant social caption, gallery entry and provider description, including scheduled posts. Add only grounded context tags. Do not apply a game's hashtag to unrelated future sources. A request for description hashtags does not authorize adding on-video headlines or a new voiceover.
@@ -17,6 +19,7 @@ Persist source-specific required description hashtags in the job state. Include 
 - Verify per-stream coverage and packet continuity, not only the maximum container duration. Preserve the highest-quality merged source until final QA succeeds. A worker lock must be checked against its live process before restarting.
 - Persist completed hours, selected global ranges, final hashes, uploads and provider post IDs. A recurrence must resume this state, not repeat already published clips. Store signed source URLs and credentials outside public repositories.
 - For long captures, check free space on both the final-source and temporary-cache volumes. New fragments and elementary tracks can use a separate configured cache directory while final merged sources retain their established paths. Capture and transcription must read the same configuration; transcription must discover both earlier and newly configured cache locations. Verify the first new batch, original PTS and complete transcript coverage. This storage choice does not require moving or deleting existing files. Never route a rejected cleanup through a different command or tool.
+- If new final sources also need a different volume, persist each finished file's absolute local path in its source receipt. Resolve sources through those receipts in editors, renderers and QA; do not assume a video lives beside its receipt. Retain earlier paths and verify both old and new sources resolve correctly. Changing future output destinations does not require moving existing captures.
 
 ## Gameplay and facecam
 

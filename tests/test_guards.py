@@ -12,6 +12,17 @@ def manifest():
       'parts':[{'source_start':0,'source_end':2,'start':0,'end':2,'mode':'solo','rects':[[600,1080,660,0]],'required_subjects':['host'],'subject_review':{'approved':True,'evidence':'Synthetic test fixture, not a real editorial approval','regions':[['host']]}}]}
 
 class GuardTests(unittest.TestCase):
+    def test_source_blur_rejects_uncovered_time_or_invalid_geometry(self):
+        m=manifest();p=m['parts'][0];p.update(mode='split',rects=[[960,1080,0,0],[960,1080,960,0]])
+        p['source_blurs']=[{'rect':[300,200,800,800],'start':0,'end':2,'radius':28,'power':4}]
+        validate(m)
+        p['source_blurs'][0]['start']=-.1
+        with self.assertRaisesRegex(ValueError,'outside its part'):validate(m)
+        p['source_blurs'][0]['start']=0;p['source_blurs'][0]['rect'][2]=1800
+        with self.assertRaisesRegex(ValueError,'outside source dimensions'):validate(m)
+        p['source_blurs'][0]['rect'][2]=800;p['source_blurs'][0]['end']=float('nan')
+        with self.assertRaisesRegex(ValueError,'Invalid source blur value'):validate(m)
+
     def test_caption_phrase_does_not_mix_speakers(self):
         words=[{'start':0,'end':.2,'text':'Money,','speaker':'npc'}, {'start':.21,'end':.4,'text':'asshole-','speaker':'npc'}, {'start':.41,'end':.5,'text':'Oh,','speaker':'streamer'}, {'start':.51,'end':.7,'text':'hell.','speaker':'streamer'}]
         groups=group_words(words)

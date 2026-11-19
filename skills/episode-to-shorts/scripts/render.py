@@ -32,6 +32,14 @@ def validate(m):
             if p['mode'] not in ['solo','split']:raise ValueError('Unknown layout mode')
             if len(p['rects'])!=(2 if p['mode']=='split' else 1):raise ValueError('Wrong number of crop rectangles')
             if 'fit_regions' in p and (p['mode']!='split' or len(p['fit_regions'])!=2 or any(type(v) is not bool for v in p['fit_regions'])):raise ValueError('fit_regions requires two boolean flags in a split layout')
+            for blur in p.get('source_blurs',[]):
+                if p['mode']!='split':raise ValueError('Source-region blur requires a split vertical layout')
+                if len(blur.get('rect',[]))!=4:raise ValueError('Invalid source blur rectangle')
+                bw,bh,bx,by=blur['rect']
+                if any(not isinstance(v,(int,float)) or not math.isfinite(v) for v in [bw,bh,bx,by,blur.get('start'),blur.get('end')]):raise ValueError('Invalid source blur value')
+                if min(bw,bh)<=0 or min(bx,by)<0 or bx+bw>m.get('source_width',3840) or by+bh>m.get('source_height',2160):raise ValueError('Source blur is outside source dimensions')
+                if not 0<=blur['start']<blur['end']<=p['source_end']-p['source_start']+eps:raise ValueError('Source blur time is outside its part')
+                if type(blur.get('radius')) is not int or not 1<=blur['radius']<=100 or type(blur.get('power')) is not int or not 1<=blur['power']<=10:raise ValueError('Invalid source blur strength')
             for w,h,x,y in p['rects']:
                 if min(w,h)<=0 or min(x,y)<0 or x+w>m.get('source_width',3840)+1 or y+h>m.get('source_height',2160)+1:raise ValueError('Crop is outside source dimensions')
             cursor=p['source_end'];pi+=1
@@ -41,6 +49,7 @@ def validate(m):
 def render(a):
     from review_subjects import validate_subjects
     m=json.loads(a.manifest.read_text(encoding='utf8'));validate(m);validate_subjects(m)
+    if any(p.get('source_blurs') for p in m['parts']) and a.format!='vertical':raise ValueError('Source-region blur is implemented for vertical exports only; refusing an uncovered landscape export')
     info=probe(a.source);video=next(s for s in info['streams'] if s['codec_type']=='video')
     if not any(s['codec_type']=='audio' for s in info['streams']):raise ValueError('Source has no audio')
     sw,sh=video['width'],video['height'];mw,mh=m.get('source_width',3840),m.get('source_height',2160)
@@ -78,7 +87,14 @@ def render(a):
                 part=job/f'part_{digest}.mp4';files.append(part)
                 if part.exists() and part.stat().st_size>10000:continue
                 if p['mode']=='split':
-                    filters=['[0:v]split=2[a][b]']
+                    filters=[];source_label='0:v'
+                    # Blur before fitted foreground/background generation, so neither can expose the original region.
+                    for bi,blur in enumerate(p.get('source_blurs',[])):
+                        bw,bh,bx,by=map(int,rect(blur['rect']).split(':'))
+                        radius=min(blur['radius'],bw//2,bh//2)
+                        filters.extend([f'[{source_label}]split=2[base{bi}][mask{bi}]',f'[mask{bi}]crop={bw}:{bh}:{bx}:{by},boxblur={radius}:{blur["power"]}[blur{bi}]',f'[base{bi}][blur{bi}]overlay={bx}:{by}:enable=\'between(t,{blur["start"]},{blur["end"]})\'[clean{bi}]'])
+                        source_label=f'clean{bi}'
+                    filters.append(f'[{source_label}]split=2[a][b]')
                     for index,label in enumerate(['a','b']):
                         crop=rect(p['rects'][index])
                         if p.get('fit_regions',[False,False])[index]:

@@ -16,6 +16,7 @@ Persist source-specific required description hashtags in the job state. Include 
 - Probe each transcription chunk's measured audio origin; do not assume it starts at exactly a multiple of five minutes. Reattach ASR word times to that measured origin.
 - Verify per-stream coverage and packet continuity, not only the maximum container duration. Preserve the highest-quality merged source until final QA succeeds. A worker lock must be checked against its live process before restarting.
 - Persist completed hours, selected global ranges, final hashes, uploads and provider post IDs. A recurrence must resume this state, not repeat already published clips. Store signed source URLs and credentials outside public repositories.
+- For long captures, check free space on both the final-source and temporary-cache volumes. New fragments and elementary tracks can use a separate configured cache directory while final merged sources retain their established paths. Capture and transcription must read the same configuration; transcription must discover both earlier and newly configured cache locations. Verify the first new batch, original PTS and complete transcript coverage. This storage choice does not require moving or deleting existing files. Never route a rejected cleanup through a different command or tool.
 
 ## Gameplay and facecam
 
@@ -30,6 +31,8 @@ Distinguish the streamer, game characters, donation TTS and radio lyrics. Diariz
 The user's latest format request overrides examples elsewhere in the skill. For 9:16-only work, run the renderer with `--format vertical`; deliver only 1080x1920 videos. Generating auxiliary ASS layouts does not require rendering an unwanted landscape video.
 
 Require independent source/export QA for every released clip, exact manifest/video hashes, full decoding and honest review scope. Waveform correlation checks synchronization; it does not establish that every ASR word is correct. Do not claim full listening when only sampled visual, ASR and waveform checks were possible.
+
+When combining per-clip independent reports, preserve each actual reviewer, evidence and limitations. Each clip needs `verdict: "pass"` as well as the report-level `status: "pass"`; an alternate clip-level `status` field alone does not satisfy the release gate. Verify the complete canonical manifest/export set and exact hashes before starting publication. A schema mismatch is not permission to manufacture a review result.
 
 When publication is authorized, rank the QA-passed clips and lead with the strongest. Read the actual channel queue, including earlier projects. Use the user's cadence, or state a reasonable cadence when none was specified. Schedule future slots instead of publishing the entire batch simultaneously. Preserve existing scheduled posts unless changing them is authorized. Store slot reservations before submitting, then reconcile actual provider IDs and statuses. Never turn an uncertain submission into a second direct upload. Gallery upload, scheduled status and published status are distinct outcomes.
 
